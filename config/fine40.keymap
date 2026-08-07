@@ -1,54 +1,94 @@
 /*
- * Aidan Smith (2021)
+ * fine!40 — 2-layer keymap
+ *
+ * Mirrors the live ZMK Studio layout as of 2026-08-07, so the compiled
+ * fallback matches what's actually on the board. Derived from Aidan Smith's
+ * original 4-layer keymap (2021).
  *
  * SPDX-License-Identifier: MIT
+ *
+ * While this board is managed through ZMK Studio, edits to the bindings below
+ * do NOT reach the device — Studio's saved settings take precedence. They only
+ * apply after a "Restore Stock Settings" in Studio. What DOES take effect
+ * regardless is the encoder sensor-bindings and the behaviors block, since
+ * Studio cannot configure encoders.
+ *
+ * Layer count is kept at 4 (2 real + 2 reserved) to match the previous build,
+ * so Studio's stored layer state maps across cleanly.
  */
 
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/bt.h>
 #include <dt-bindings/zmk/ext_power.h>
 #include <dt-bindings/zmk/keys.h>
+#include <dt-bindings/zmk/pointing.h>
 
 / {
+    behaviors {
+        // Rotary encoder -> mouse scroll wheel.
+        // Swap the two bindings if it scrolls the wrong way.
+        scroll_encoder: scroll_encoder {
+            compatible = "zmk,behavior-sensor-rotate";
+            #sensor-binding-cells = <0>;
+            bindings = <&msc SCRL_UP>, <&msc SCRL_DOWN>;
+        };
+    };
+
     keymap {
         compatible = "zmk,keymap";
 
         default_layer {
+            display-name = "Base";
+
+            // ---------------------------------------------------------------------------------
+            // | ESC  |  Q   |  W   |  E   |  R   |  T   |  Y  |  U   |  I   |  O   |  P   | BSPC |
+            // | TAB  |  A   |  S   |  D   |  F   |  G   |  H  |  J   |  K   |  L   |  ;   | RET  |
+            // | CAPS |  Z   |  X   |  C   |  V   |  B   |  N  |  M   |  ,   |  .   |  UP  |  '   |
+            // | LCTL | LGUI | LALT |  FN  | SPC  | SHFT | --- |  /   | LEFT | DOWN | RGHT | RET  |
+            // ---------------------------------------------------------------------------------
+            // Last key on the bottom row is the encoder push-switch.
+            // Arrows form an inverted-T: UP on row 3, LEFT/DOWN/RIGHT on row 4.
+
             bindings = <
-&kp ESC    &kp Q     &kp W     &kp E     &kp R  &kp T      &kp Y        &kp U     &kp I      &kp O     &kp P      &kp BSPC
-&lt 3 TAB  &kp A     &kp S     &kp D     &kp F  &kp G      &kp H        &kp J     &kp K      &kp L     &kp SEMI   &kp SQT
-&kp LSHFT  &kp Z     &kp X     &kp C     &kp V  &kp B      &kp N        &kp M     &kp COMMA  &kp DOT   &kp FSLH   &kp RET
-&kp LCTRL  &kp LGUI  &kp LALT  &kp BSLH  &mo 2  &kp SPACE  &lt 1 SPACE  &kp LEFT  &kp UP     &kp DOWN  &kp RIGHT  &kp C_PP
+&kp ESC    &kp Q     &kp W     &kp E   &kp R      &kp T      &kp Y   &kp U     &kp I      &kp O     &kp P      &kp BSPC
+&kp TAB    &kp A     &kp S     &kp D   &kp F      &kp G      &kp H   &kp J     &kp K      &kp L     &kp SEMI   &kp RET
+&kp CAPS   &kp Z     &kp X     &kp C   &kp V      &kp B      &kp N   &kp M     &kp COMMA  &kp DOT   &kp UP     &kp SQT
+&kp LCTRL  &kp LGUI  &kp LALT  &mo 1   &kp SPACE  &kp LSHFT  &none   &kp FSLH  &kp LEFT   &kp DOWN  &kp RIGHT  &kp RET
             >;
 
-            sensor-bindings = <&inc_dec_kp C_VOL_UP C_VOL_DN>;
+            sensor-bindings = <&scroll_encoder>;
         };
 
-        right {
+        fn_layer {
+            display-name = "Fn";
+
+            // ---------------------------------------------------------------------------------
+            // |   `   |  1   |  2   |  3  |  4  |  5  |  6  | 7    |  8   |  9   |  0  | DEL   |
+            // |  ---  | F1   | F2   | F3  | F4  | F5  | F6  | -    |  =   |  {   |  }  | ---   |
+            // |  ---  | F7   | F8   | F9  | F10 | F11 | F12 | ---  |  <   |  >   | --- | ---   |
+            // | BTSEL0|BTCLR |BTSEL1| --- | UNLK| --- | --- | HOME | PGDN | PGUP | END | BOOT  |
+            // ---------------------------------------------------------------------------------
+            // BTCLR clears ALL bluetooth profiles. Bootloader is on Fn + encoder click.
+            // UNLK (&studio_unlock, on Fn + Space) is what unlocks ZMK Studio for editing.
+
             bindings = <
-&kp LS(GRAVE)  &kp LS(N1)    &kp LS(N2)    &kp LS(N3)    &kp LS(N4)    &kp LS(N5)    &kp LS(N6)  &kp LS(N7)  &kp LS(N8)     &kp LS(N9)    &kp LS(N0)  &kp DEL
-&trans         &trans        &trans        &trans        &trans        &trans        &trans      &kp MINUS   &kp EQUAL      &kp LBKT      &kp RBKT    &trans
-&trans         &trans        &trans        &trans        &trans        &trans        &trans      &trans      &kp LS(COMMA)  &kp LS(DOT)   &trans      &trans
-&bt BT_CLR     &bt BT_SEL 0  &bt BT_SEL 1  &bt BT_SEL 2  &bt BT_SEL 3  &bt BT_SEL 4  &trans      &kp C_MUTE  &kp C_VOL_DN   &kp C_VOL_UP  &kp C_PP    &trans
+&kp GRAVE      &kp N1          &kp N2        &kp N3   &kp N4          &kp N5   &kp N6   &kp N7     &kp N8         &kp N9       &kp N0    &kp DEL
+&trans         &kp F1          &kp F2        &kp F3   &kp F4          &kp F5   &kp F6   &kp MINUS  &kp EQUAL      &kp LBRC     &kp RBRC  &trans
+&trans         &kp F7          &kp F8        &kp F9   &kp F10         &kp F11  &kp F12  &trans     &kp LS(COMMA)  &kp LS(DOT)  &trans    &trans
+&bt BT_SEL 0   &bt BT_CLR_ALL  &bt BT_SEL 1  &none    &studio_unlock  &trans   &trans   &kp HOME   &kp PG_DN      &kp PG_UP    &kp END   &bootloader
             >;
+
+            sensor-bindings = <&inc_dec_kp C_BRI_UP C_BRI_DN>;
         };
 
-        left {
-            bindings = <
-&kp GRAVE  &kp N1  &kp N2  &kp N3  &kp N4  &kp N5  &kp N6  &kp N7     &kp N8     &kp N9     &kp N0    &kp BSPC
-&trans     &trans  &trans  &trans  &trans  &trans  &trans  &kp UNDER  &kp PLUS   &kp LBRC   &kp RBRC  &trans
-&trans     &trans  &trans  &trans  &trans  &trans  &trans  &trans     &trans     &trans     &trans    &trans
-&trans     &trans  &trans  &trans  &trans  &trans  &trans  &kp HOME   &kp PG_DN  &kp PG_UP  &kp END   &trans
-            >;
+        // Spare layers so ZMK Studio can add more without a reflash.
+        // (Studio cannot create layers beyond what devicetree declares.)
+        extra1 {
+            status = "reserved";
         };
 
-        control {
-            bindings = <
-&sys_reset      &bootloader  &bt BT_CLR  &bt BT_PRV  &bt BT_NXT  &trans   &trans   &trans   &trans   &trans   &trans   &trans
-&trans          &kp F11      &kp F12     &kp F13     &kp F14     &kp F15  &kp F16  &kp F17  &kp F18  &kp F19  &kp F20  &trans
-&trans          &kp F1       &kp F2      &kp F3      &kp F4      &kp F5   &kp F6   &kp F7   &kp F8   &kp F9   &kp F10  &trans
-&studio_unlock  &trans       &trans      &trans      &trans      &trans   &trans   &trans   &trans   &trans   &trans   &ext_power EP_ON
-            >;
+        extra2 {
+            status = "reserved";
         };
     };
 };
