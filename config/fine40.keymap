@@ -49,6 +49,7 @@
             >;
 
             // Encoder: CCW = Left arrow, CW = Right arrow.
+
             sensor-bindings = <&inc_dec_kp RIGHT LEFT>;
         };
 
@@ -72,7 +73,8 @@
             >;
 
             // Encoder: CCW = Down arrow, CW = Up arrow.
-            sensor-bindings = <&inc_dec_kp UP DOWN>;
+
+            sensor-bindings = <&inc_dec_kp DOWN UP>;
         };
 
         // Spare layers so ZMK Studio can add more without a reflash.
