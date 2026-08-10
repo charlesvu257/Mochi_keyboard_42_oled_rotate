@@ -10,8 +10,8 @@
  * While this board is managed through ZMK Studio, edits to the bindings below
  * do NOT reach the device — Studio's saved settings take precedence. They only
  * apply after a "Restore Stock Settings" in Studio. What DOES take effect
- * regardless is the encoder sensor-bindings and the behaviors block, since
- * Studio cannot configure encoders.
+ * regardless is the encoder sensor-bindings, since Studio cannot configure
+ * encoders.
  *
  * Layer count is kept at 4 (2 real + 2 reserved) to match the previous build,
  * so Studio's stored layer state maps across cleanly.
@@ -20,19 +20,11 @@
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/bt.h>
 #include <dt-bindings/zmk/keys.h>
-#include <dt-bindings/zmk/pointing.h>
 
 / {
-    behaviors {
-        // Rotary encoder -> mouse scroll wheel.
-        // Swap the two bindings if it scrolls the wrong way.
-
-        scroll_encoder: scroll_encoder {
-            compatible = "zmk,behavior-sensor-rotate";
-            #sensor-binding-cells = <0>;
-            bindings = <&msc SCRL_UP>, <&msc SCRL_DOWN>;
-        };
-    };
+    // Encoder convention for &inc_dec_kp: first keycode is clockwise
+    // (rotate right), second is counter-clockwise (rotate left).
+    // If the board is wired the other way round, swap the pair.
 
     keymap {
         compatible = "zmk,keymap";
@@ -56,7 +48,8 @@
 &kp LCTRL  &kp LGUI  &kp LALT  &mo 1  &kp SPACE  &kp LSHFT  &none  &kp FSLH  &kp LEFT   &kp DOWN  &kp RIGHT  &kp RET
             >;
 
-            sensor-bindings = <&scroll_encoder>;
+            // Encoder: CCW = Left arrow, CW = Right arrow.
+            sensor-bindings = <&inc_dec_kp RIGHT LEFT>;
         };
 
         fn_layer {
@@ -78,7 +71,8 @@
 &bt BT_SEL 0  &bt BT_CLR_ALL  &bt BT_SEL 1  &none   &studio_unlock  &trans   &trans   &kp HOME   &kp PG_DN      &kp PG_UP    &kp END   &bootloader
             >;
 
-            sensor-bindings = <&inc_dec_kp C_BRI_UP C_BRI_DN>;
+            // Encoder: CCW = Down arrow, CW = Up arrow.
+            sensor-bindings = <&inc_dec_kp UP DOWN>;
         };
 
         // Spare layers so ZMK Studio can add more without a reflash.
