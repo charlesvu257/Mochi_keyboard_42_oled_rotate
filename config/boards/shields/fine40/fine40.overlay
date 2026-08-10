@@ -125,13 +125,36 @@ default_transform: keymap_transform_0 {
 
 };
 
+/*
+ * Force the nice!nano's onboard blue LED (P0.15) off.
+ *
+ * ZMK never drives this pin: nice_nano.dtsi declares the LED node but no "led0"
+ * alias, and ZMK core has no LED status feature at all. So the pin is normally
+ * left in its reset state — an input — and a floating input is the one way the
+ * LED could light without anything asking it to. This hog clamps it low at
+ * boot, which is the only lever firmware has over that LED.
+ *
+ * P0.15 is not routed to the Pro Micro header (it is the onboard LED only), so
+ * driving it is safe and cannot clash with the matrix.
+ *
+ * If the LED still blinks with this in place, it is not P0.15, and therefore
+ * not something any firmware change can reach — see the charge LED note.
+ */
+&gpio0 {
+	blue_led_off {
+		gpio-hog;
+		gpios = <15 GPIO_ACTIVE_HIGH>;
+		output-low;
+	};
+};
+
 &pro_micro_i2c {
 	status = "okay";
 
 	/*
-	 * 400kHz (I2C fast mode). The default 100kHz needs ~100ms to push a full
-	 * 128x64 mono frame, which caps the ripple animation at ~10fps. At 400kHz
-	 * that drops to ~25ms and 20fps has plenty of headroom.
+	 * 400kHz (I2C fast mode). A full 128x32 mono frame is 512 bytes, which
+	 * needs ~50ms at the default 100kHz and caps the ripple animation at
+	 * ~20fps. At 400kHz it drops to ~12ms, leaving plenty of headroom.
 	 */
 	clock-frequency = <400000>;
 
@@ -139,12 +162,23 @@ default_transform: keymap_transform_0 {
 		compatible = "solomon,ssd1306fb";
 		reg = <0x3c>;
 		label = "DISPLAY";
+		/*
+		 * 0.91" panel: 128x32, not 128x64. This was previously declared as
+		 * 64 rows, so everything was rendered into twice the rows that
+		 * physically exist and came out squashed vertically — which is what
+		 * made the stock ZMK status screen look stretched too.
+		 *
+		 * "com-sequential" is required on 32-row panels: they wire the COM
+		 * pins sequentially rather than alternating, and without it the
+		 * image renders interlaced.
+		 */
 		width = <128>;
-		height = <64>;
+		height = <32>;
 		segment-offset = <0>;
 		page-offset = <0>;
 		display-offset = <0>;
-		multiplex-ratio = <63>;
+		multiplex-ratio = <31>;
+		com-sequential;
 		prechargep = <0x22>;
 
 		/*

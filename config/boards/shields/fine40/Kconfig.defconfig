@@ -50,28 +50,67 @@ config FINE40_RIPPLE_CAPS_SHOCKWAVE
 
 config FINE40_RIPPLE_FRAME_MS
 	int "Frame interval in milliseconds"
-	default 50
+	default 40
 	help
-	  50ms is 20fps. Pushing a 1 KB frame over I2C at 400kHz costs roughly
-	  25ms, so going much below 40 here will saturate the bus.
+	  40ms is 25fps. Pushing a 512-byte 128x32 frame over I2C at 400kHz costs
+	  roughly 12ms, so there is room here, but the bus is shared with nothing
+	  else and there is no reason to run it hotter than the eye needs.
 
 config FINE40_RIPPLE_SPEED_X10
 	int "Wavefront speed, in tenths of a pixel per frame"
-	default 35
+	default 20
 
 config FINE40_RIPPLE_MAX_RADIUS
 	int "Radius at which a wavefront has spent all its energy"
-	default 84
+	default 40
+	help
+	  Keep this near the panel's short dimension. Much larger and a wave
+	  spends most of its life with the top and bottom of the ring off-screen,
+	  leaving only the left and right arcs visible, which reads as the wave
+	  being stretched horizontally.
 
 config FINE40_RIPPLE_WAVELENGTH
 	int "Pixels between concentric wavefronts of one impact"
-	default 9
+	default 6
 
 config FINE40_RIPPLE_MAX_ACTIVE
 	int "Maximum simultaneous ripples"
-	default 8
+	default 6
 	help
 	  Once this many are in flight, a new key press recycles the oldest.
+	  Each ripple now costs five rings rather than one, so this is the first
+	  knob to turn down if the animation stutters.
+
+config FINE40_RIPPLE_REFLECT_PCT
+	int "Energy retained when a wave bounces off a wall, in percent"
+	default 70
+	range 0 100
+	help
+	  0 disables reflection, and waves simply run off the edge of the panel.
+
+config FINE40_RIPPLE_INTERFERENCE
+	bool "Let overlapping wavefronts cancel each other"
+	default y
+	help
+	  Draws wavefronts by inverting pixels rather than setting them, so two
+	  waves crossing cancel where they meet. Turn off for plain stacking.
+
+config FINE40_RIPPLE_ASPECT_PCT
+	int "Horizontal wave radius as a percentage of the vertical radius"
+	default 100
+	range 10 200
+	help
+	  Correction for panels whose pixels are not square. 100 draws true
+	  circles in pixel space. If circles come out as wide ovals, lower this;
+	  a panel with pixels twice as wide as they are tall wants 50. Enable
+	  FINE40_RIPPLE_TEST_PATTERN to measure it.
+
+config FINE40_RIPPLE_TEST_PATTERN
+	bool "Show a panel geometry check until the first key press"
+	help
+	  Draws the panel edges, a square, and a circle inscribed in that square.
+	  On correct geometry the rectangle sits exactly on the glass edges and
+	  the circle touches the square at the midpoint of each side.
 
 endif # FINE40_RIPPLE
 
