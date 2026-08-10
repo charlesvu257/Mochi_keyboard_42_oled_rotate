@@ -126,27 +126,12 @@ default_transform: keymap_transform_0 {
 };
 
 /*
- * Force the nice!nano's onboard blue LED (P0.15) off.
- *
- * ZMK never drives this pin: nice_nano.dtsi declares the LED node but no "led0"
- * alias, and ZMK core has no LED status feature at all. So the pin is normally
- * left in its reset state — an input — and a floating input is the one way the
- * LED could light without anything asking it to. This hog clamps it low at
- * boot, which is the only lever firmware has over that LED.
- *
- * P0.15 is not routed to the Pro Micro header (it is the onboard LED only), so
- * driving it is safe and cannot clash with the matrix.
- *
- * If the LED still blinks with this in place, it is not P0.15, and therefore
- * not something any firmware change can reach — see the charge LED note.
+ * There was briefly a gpio-hog here clamping P0.15 (the nice!nano's onboard
+ * blue LED) low. It was removed after testing: with the pin held low the LED
+ * still lit, which proves the LED in question is not P0.15 and therefore not
+ * reachable from firmware at all. It is the charge indicator, wired straight
+ * from the charger IC with no connection to the MCU.
  */
-&gpio0 {
-	blue_led_off {
-		gpio-hog;
-		gpios = <15 GPIO_ACTIVE_HIGH>;
-		output-low;
-	};
-};
 
 &pro_micro_i2c {
 	status = "okay";

@@ -19,11 +19,27 @@
 #define FINE40_RIPPLE_W DT_PROP(FINE40_DISPLAY_NODE, width)
 #define FINE40_RIPPLE_H DT_PROP(FINE40_DISPLAY_NODE, height)
 
+/*
+ * Key down throws a wave outward; key up pulls one back in; the encoder sends
+ * a straight wavefront sweeping across the panel. Swipe directions are named
+ * for what the user sees on the glass, not for framebuffer axes — see
+ * FINE40_RIPPLE_PANEL_ROTATED.
+ */
+enum fine40_ripple_mode {
+    FINE40_RIPPLE_EXPAND = 0,
+    FINE40_RIPPLE_IMPLODE = 1,
+    FINE40_RIPPLE_SWIPE_RIGHT = 2,
+    FINE40_RIPPLE_SWIPE_LEFT = 3,
+    FINE40_RIPPLE_SWIPE_DOWN = 4,
+    FINE40_RIPPLE_SWIPE_UP = 5,
+};
+
 struct fine40_ripple {
     int16_t cx;
     int16_t cy;
     uint16_t age; /* frames since spawn */
     uint8_t active;
+    uint8_t mode;
 };
 
 struct zmk_widget_ripple {
