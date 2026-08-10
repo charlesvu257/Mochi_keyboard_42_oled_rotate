@@ -128,6 +128,13 @@ default_transform: keymap_transform_0 {
 &pro_micro_i2c {
 	status = "okay";
 
+	/*
+	 * 400kHz (I2C fast mode). The default 100kHz needs ~100ms to push a full
+	 * 128x64 mono frame, which caps the ripple animation at ~10fps. At 400kHz
+	 * that drops to ~25ms and 20fps has plenty of headroom.
+	 */
+	clock-frequency = <400000>;
+
 	oled: ssd1306@3c {
 		compatible = "solomon,ssd1306fb";
 		reg = <0x3c>;
@@ -139,6 +146,13 @@ default_transform: keymap_transform_0 {
 		display-offset = <0>;
 		multiplex-ratio = <63>;
 		prechargep = <0x22>;
-		inversion-on;
+
+		/*
+		 * "inversion-on" was removed deliberately. It existed to make ZMK's
+		 * stock status screen render white-on-black, but the ripple widget
+		 * picks its own colours and flips them on Caps Lock, so a panel-level
+		 * inversion here would just fight the C code. Polarity now has exactly
+		 * one switch: CONFIG_FINE40_RIPPLE_INVERT.
+		 */
 	};
 };

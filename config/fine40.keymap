@@ -49,7 +49,6 @@
             >;
 
             // Encoder: CCW = Left arrow, CW = Right arrow.
-
             sensor-bindings = <&inc_dec_kp RIGHT LEFT>;
         };
 
@@ -72,8 +71,7 @@
 &bt BT_SEL 0  &bt BT_CLR_ALL  &bt BT_SEL 1  &none   &studio_unlock  &trans   &trans   &kp HOME   &kp PG_DN      &kp PG_UP    &kp END   &bootloader
             >;
 
-            // Encoder: CCW = Down arrow, CW = Up arrow.
-
+            // Encoder: CCW = Up arrow, CW = Down arrow.
             sensor-bindings = <&inc_dec_kp DOWN UP>;
         };
 

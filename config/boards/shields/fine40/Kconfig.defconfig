@@ -9,10 +9,78 @@ config I2C
 config SSD1306
 	default y
 
+# --- Custom OLED status screen: full-screen keystroke ripple ---
+
+choice ZMK_DISPLAY_STATUS_SCREEN
+	default ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+endchoice
+
+config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+	imply FINE40_RIPPLE
+
+config LV_Z_MEM_POOL_SIZE
+	default 4096 if ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+
+# Animating at 20fps on the main thread would add latency to keypresses.
+choice ZMK_DISPLAY_WORK_QUEUE
+	default ZMK_DISPLAY_WORK_QUEUE_DEDICATED
+endchoice
+
+config FINE40_RIPPLE
+	bool "Full-screen keystroke ripple status screen"
+	select LV_USE_CANVAS
+	select LV_USE_IMG
+	select ZMK_HID_INDICATORS
+	help
+	  Every key press sends an expanding wavefront out from the point on the
+	  OLED matching that physical key. Caps Lock inverts the whole panel.
+
+if FINE40_RIPPLE
+
+config FINE40_RIPPLE_INVERT
+	bool "Swap ripple and background colours"
+	help
+	  Normally the field is black with white ripples, inverting to white with
+	  black ripples while Caps Lock is on. Enable this if the panel reads the
+	  other way round on your hardware.
+
+config FINE40_RIPPLE_CAPS_SHOCKWAVE
+	bool "Emit a ripple from the centre when Caps Lock toggles"
+	default y
+
+config FINE40_RIPPLE_FRAME_MS
+	int "Frame interval in milliseconds"
+	default 50
+	help
+	  50ms is 20fps. Pushing a 1 KB frame over I2C at 400kHz costs roughly
+	  25ms, so going much below 40 here will saturate the bus.
+
+config FINE40_RIPPLE_SPEED_X10
+	int "Wavefront speed, in tenths of a pixel per frame"
+	default 35
+
+config FINE40_RIPPLE_MAX_RADIUS
+	int "Radius at which a wavefront has spent all its energy"
+	default 84
+
+config FINE40_RIPPLE_WAVELENGTH
+	int "Pixels between concentric wavefronts of one impact"
+	default 9
+
+config FINE40_RIPPLE_MAX_ACTIVE
+	int "Maximum simultaneous ripples"
+	default 8
+	help
+	  Once this many are in flight, a new key press recycles the oldest.
+
+endif # FINE40_RIPPLE
+
 if LVGL
 
+# The whole panel is redrawn every frame, so render it in a single pass rather
+# than tiling it. At 1 bit per pixel a 100% buffer is only ~1 KB.
 config LV_Z_VDB_SIZE
-	default 64
+	default 100
 
 config LV_DPI_DEF
 	default 148
@@ -27,4 +95,3 @@ endchoice
 endif # LVGL
 
 endif
-
