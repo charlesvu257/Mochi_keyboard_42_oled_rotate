@@ -37,48 +37,52 @@ config FINE40_RIPPLE
 
 if FINE40_RIPPLE
 
-config FINE40_RIPPLE_SWIPE_ON_ENCODER
-	bool "Sweep a wavefront across the panel when the knob turns"
+config FINE40_RIPPLE_CUBE
+	bool "Wireframe cube in the middle of the panel"
 	default y
 	help
-	  Follows the encoder's keymap bindings: on the base layer the knob
-	  swipes left and right, on any layer above it swipes up and down.
+	  A 3D wireframe cube sits permanently at the centre and turns when the
+	  knob clicks, following the encoder's keymap bindings: the base layer
+	  moves left and right so the cube yaws, any layer above moves up and
+	  down so it pitches. Drawn solid, on top of the wave field.
 
 config FINE40_RIPPLE_PANEL_ROTATED
 	bool "Panel is mounted a quarter turn over"
 	default y
 	help
 	  The framebuffer is always 128x32, but this module is mounted portrait,
-	  so on the glass the 128-pixel axis runs top to bottom. Swipes are named
-	  for what you see, so they need to know this. Turn off for a panel
+	  so on the glass the 128-pixel axis runs top to bottom. The cube needs
+	  to know, or a yaw would show up as a tumble. Turn off for a panel
 	  mounted the normal way round.
 
-config FINE40_RIPPLE_SWIPE_FLIP_H
-	bool "Mirror left/right swipes"
-	depends on FINE40_RIPPLE_SWIPE_ON_ENCODER
+config FINE40_CUBE_INVERT
+	bool "Reverse which way the knob turns the cube"
+	default y
+	depends on FINE40_RIPPLE_CUBE
 	help
-	  Which way round a rotated panel sits cannot be known from the
-	  devicetree. If left/right swipes run backwards, set this. If BOTH
-	  axes run backwards, the encoder's sense is reversed rather than the
-	  panel's — set this and FLIP_V together.
+	  Whether a clockwise detent reports as positive depends on how the
+	  encoder is wired, and this board reports it backwards — hence the
+	  default. Clear it if the cube turns against the knob.
 
-config FINE40_RIPPLE_SWIPE_FLIP_V
-	bool "Mirror up/down swipes"
-	depends on FINE40_RIPPLE_SWIPE_ON_ENCODER
-
-config FINE40_RIPPLE_SWIPE_SPEED_X10
-	int "Swipe speed, in tenths of a pixel per frame"
-	default 40
+config FINE40_CUBE_SCALE
+	int "Cube size, as a projection scale factor"
+	default 22
 	help
-	  Swipes get their own clock, well above the wave speed, because a
-	  swipe should feel like a flick rather than a spreading ripple. Note
-	  a swipe crossing the panel's short axis is over four times quicker
-	  than one crossing the long axis; that is honest, not a bug.
+	  Larger is bigger. Hard-capped by the panel's short axis: at 22 the
+	  cube spans about 26 of the 32 available pixels at its widest
+	  orientation, so there is not much room above this before corners
+	  start clipping.
 
-config FINE40_RIPPLE_SWIPE_MIN_MS
-	int "Shortest gap between swipes, in milliseconds"
+config FINE40_CUBE_STEP
+	int "Rotation per detent, in sixteenths of a sine-table step"
+	default 64
+	help
+	  There are 1024 units to a full turn, so the default of 64 is an
+	  eighth turn, 22.5 degrees, per click.
+
+config FINE40_CUBE_MIN_MS
+	int "Shortest gap between knob nudges, in milliseconds"
 	default 60
-	depends on FINE40_RIPPLE_SWIPE_ON_ENCODER
 	help
 	  Rate limit for encoder events, which may arrive several times per
 	  detent depending on the encoder's resolution.
@@ -93,22 +97,6 @@ config FINE40_RIPPLE_INVERT
 config FINE40_RIPPLE_CAPS_SHOCKWAVE
 	bool "Emit a ripple from the centre when Caps Lock toggles"
 	default y
-
-config FINE40_RIPPLE_ON_RELEASE
-	bool "Collapse a wave inward when a key is released"
-	default y
-	help
-	  Key down throws a wave outward; key up pulls one back in, converging
-	  on the key you let go of and brightening as it focuses. Turn this off
-	  to react to presses only.
-
-config FINE40_RIPPLE_RELEASE_RADIUS
-	int "Radius a release wave starts from before collapsing"
-	default 28
-	help
-	  Deliberately smaller than MAX_RADIUS. A release is a lighter event
-	  than a strike, and keeping it local stops every keystroke from
-	  costing two full-size waves.
 
 config FINE40_RIPPLE_FRAME_MS
 	int "Frame interval in milliseconds"
@@ -142,14 +130,13 @@ config FINE40_RIPPLE_WAVELENGTH
 
 config FINE40_RIPPLE_MAX_ACTIVE
 	int "Maximum simultaneous ripples"
-	default 14
+	default 10
 	help
 	  Once this many are in flight, a new key press recycles the oldest,
 	  which looks like a ripple vanishing mid-life. This has to scale with
-	  lifetime, and with reacting to releases as well as presses, since a
-	  keystroke now produces two waves. An expanding wave costs five rings
-	  (its own plus four reflections); a collapsing one costs two and no
-	  reflections, so releases are cheap. Turn this down first if the
+	  lifetime: at roughly two seconds per ripple, normal typing keeps about
+	  ten alive at once. Each ripple costs five rings (its own plus four
+	  reflections), so this is also the first knob to turn down if the
 	  animation stutters.
 
 config FINE40_RIPPLE_REFLECT_PCT
