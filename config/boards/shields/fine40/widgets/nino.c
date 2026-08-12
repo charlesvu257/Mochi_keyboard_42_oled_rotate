@@ -58,8 +58,7 @@
 /* Layout, in screen space. The track starts near the top now that the bell is
  * the globe rather than a glyph in the corner. */
 #define TRACK_TOP 8
-#define CARRIAGE_POINT 4  /* height of the chevron under the carriage bar */
-#define LAYER_LINE_GAP 6  /* clears the chevron when it flips upward */
+#define CARRIAGE_POINT 4 /* height of the chevron under the carriage bar */
 
 #define BALL_CX (SCREEN_W / 2)
 #define BALL_CY (SCREEN_H - 22)
@@ -324,12 +323,6 @@ static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
     for (int i = 1; i <= CARRIAGE_POINT; i++) {
         int half = CARRIAGE_POINT - i;
         screen_hline(buf, (SCREEN_W / 2) - half, (SCREEN_W / 2) + half, y + (i * dir), 16);
-    }
-
-    /* A second rail above the bar while a layer is held. Sits clear of the
-     * chevron so it stays readable when the carriage flips during a slam. */
-    if (zmk_keymap_highest_layer_active() > 0) {
-        screen_hline(buf, 1, SCREEN_W - 2, y - LAYER_LINE_GAP, 16);
     }
 }
 

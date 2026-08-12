@@ -133,6 +133,40 @@ default_transform: keymap_transform_0 {
  * from the charger IC with no connection to the MCU.
  */
 
+/*
+ * Repartition for note storage.
+ *
+ * The stock split is 792K firmware / 32K storage, which was sized for a
+ * keyboard that only ever stores BLE bonds and a Studio keymap. NINO carries
+ * notes, so the boundary moves: 448K firmware / 376K storage.
+ *
+ * The usable region is fixed at 0x26000..0xF4000 (824K) — below that is
+ * reserved for the softdevice, above it is the Adafruit bootloader. Only the
+ * boundary between the two middle partitions is ours to move.
+ *
+ *   0x26000 + 0x70000 = 0x96000   448K firmware (281K used before BLE was cut)
+ *   0x96000 + 0x5E000 = 0xF4000   376K storage
+ *
+ * NOTE: this wipes settings. NVS now starts at a different address, so ZMK
+ * reads blank flash on first boot — Studio's saved keymap is gone and the
+ * compiled keymap in fine40.keymap finally takes effect. That is the intended
+ * outcome, but it is a one-way trip.
+ */
+&flash0 {
+	partitions {
+		/delete-node/ partition@26000;
+		/delete-node/ partition@ec000;
+
+		code_partition: partition@26000 {
+			reg = <0x00026000 0x00070000>;
+		};
+
+		storage_partition: partition@96000 {
+			reg = <0x00096000 0x0005e000>;
+		};
+	};
+};
+
 &pro_micro_i2c {
 	status = "okay";
 
