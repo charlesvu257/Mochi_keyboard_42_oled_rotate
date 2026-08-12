@@ -57,8 +57,9 @@ config NINO_PANEL_FLIP
 config NINO_INVERT
 	bool "Swap ink and background"
 	help
-	  Normally the panel is dark with light pixels, inverting while Caps Lock
-	  is on. Enable this if it reads the other way round on your hardware.
+	  Normally the panel is dark with light pixels. Enable this if it reads
+	  the other way round on your hardware. Caps Lock no longer inverts the
+	  panel — it inverts the globe only.
 
 config NINO_FRAME_MS
 	int "Frame interval in milliseconds"
@@ -98,9 +99,28 @@ config NINO_SLAM_SPEED
 	  The carriage advances one pixel per character but returns at this
 	  speed, so a full line snaps back in about three frames.
 
+config NINO_SLAM_FLASH_FRAMES
+	int "Frames the whole panel inverts on carriage return"
+	default 5
+	help
+	  The slam owns the whole screen. The margin bell only flashes the globe,
+	  which keeps the common event quiet and the rare one loud.
+
 config NINO_SHAKE_FRAMES
 	int "Frames of screen shake on carriage return"
-	default 2
+	default 5
+
+config NINO_SHAKE_MAG
+	int "Pixels of screen offset during a carriage-return shake"
+	default 3
+	help
+	  Ruler ticks get a fixed one-pixel nudge; this is only the slam.
+
+config NINO_BALL_RECOIL
+	int "Pixels the globe kicks upward when the carriage slams"
+	default 6
+	help
+	  Halves each frame, so it settles in about four.
 
 # --- Globe ---
 

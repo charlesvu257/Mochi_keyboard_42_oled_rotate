@@ -58,38 +58,19 @@
 /* Layout, in screen space. The track starts near the top now that the bell is
  * the globe rather than a glyph in the corner. */
 #define TRACK_TOP 8
-#define CARRIAGE_POINT 4 /* height of the chevron under the carriage bar */
+#define CARRIAGE_POINT 4  /* height of the chevron under the carriage bar */
+#define LAYER_LINE_GAP 6  /* clears the chevron when it flips upward */
 
 #define BALL_CX (SCREEN_W / 2)
 #define BALL_CY (SCREEN_H - 22)
 
-/* Whole-screen invert lengths, in frames. */
-#define STRIKE_SINGLE 4
-#define STRIKE_DOUBLE 10
-
-/* The globe's own flash, for a knob click. */
+/* The globe's own flash: a knob click, or the margin bell. */
 #define GLOBE_FLASH_TOTAL 10
 
-/*
- * A strike flips every pixel on the panel. One pulse for a carriage return,
- * two for the margin bell, so the two are distinguishable at a glance without
- * needing separate iconography.
- */
-static bool strike_inverted(uint8_t t, bool doubled) {
-    if (t == 0) {
-        return false;
-    }
-    if (!doubled) {
-        return true;
-    }
-    if (t > 7) {
-        return true; /* first pulse */
-    }
-    if (t > 4) {
-        return false; /* gap */
-    }
-    return true; /* second pulse */
-}
+/* A ruler tick every this many characters, and a nudge when one is crossed. */
+#define RULER_MAJOR 25
+#define TICK_SHAKE_FRAMES 2
+#define TICK_SHAKE_MAG 1
 
 /*
  * 4x4 ordered dither. A pixel is drawn when its threshold is below the
@@ -320,7 +301,7 @@ static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
      */
     for (int c = 0; c <= track_len; c += 5) {
         int y = TRACK_TOP + c;
-        int len = (c % 25 == 0) ? 3 : 1;
+        int len = (c % RULER_MAJOR == 0) ? 3 : 1;
         screen_hline(buf, 0, len - 1, y, 16);
         screen_hline(buf, SCREEN_W - len, SCREEN_W - 1, y, 16);
     }
@@ -344,6 +325,12 @@ static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
         int half = CARRIAGE_POINT - i;
         screen_hline(buf, (SCREEN_W / 2) - half, (SCREEN_W / 2) + half, y + (i * dir), 16);
     }
+
+    /* A second rail above the bar while a layer is held. Sits clear of the
+     * chevron so it stays readable when the carriage flips during a slam. */
+    if (zmk_keymap_highest_layer_active() > 0) {
+        screen_hline(buf, 1, SCREEN_W - 2, y - LAYER_LINE_GAP, 16);
+    }
 }
 
 /* ------------------------------------------------------------------ globe -- */
@@ -364,14 +351,21 @@ static void globe_point(int x, int y, int z, int sin_y, int cos_y, int sin_p, in
 
 static void draw_globe(uint8_t *buf, const struct zmk_widget_nino *widget) {
     const int r = CONFIG_NINO_BALL_RADIUS;
+    /* Kicked upward by a carriage slam, settling back over a few frames. */
+    const int cy = BALL_CY - widget->ball_recoil;
+    const uint8_t ink = draw_ink;
 
     /*
-     * A click flashes the globe: two frames filled solid, then a shockwave ring
-     * expanding out of it and fading. The grid is skipped during the solid part
-     * so the flash reads as a single bright pulse rather than a busy one.
+     * The flash is handled first and always in the normal ink. Doing it after
+     * the Caps Lock inversion below would draw the shockwave in the background
+     * colour, leaving it invisible whenever Caps Lock happened to be on.
+     *
+     * Two frames filled solid, then a shockwave ring expanding out and fading.
+     * The grid is skipped during the solid part so it reads as one bright
+     * pulse rather than a busy one.
      */
     if (widget->globe_flash > GLOBE_FLASH_TOTAL - 2) {
-        screen_disc(buf, BALL_CX, BALL_CY, r, 16);
+        screen_disc(buf, BALL_CX, cy, r, 16);
         return;
     }
 
@@ -379,12 +373,22 @@ static void draw_globe(uint8_t *buf, const struct zmk_widget_nino *widget) {
         int t = (GLOBE_FLASH_TOTAL - 2) - widget->globe_flash + 1;
         int amp = 16 - (t * 2);
         if (amp > 0) {
-            screen_circle(buf, BALL_CX, BALL_CY, r + (t * 2), (uint8_t)amp);
+            screen_circle(buf, BALL_CX, cy, r + (t * 2), (uint8_t)amp);
         }
     }
 
+    /*
+     * Caps Lock inverts the globe and nothing else: a filled disc with the
+     * grid knocked back out of it in the background colour. Local, legible,
+     * and far less violent than flipping the whole panel.
+     */
+    if (widget->caps) {
+        screen_disc(buf, BALL_CX, cy, r, 16);
+        draw_ink = (uint8_t)~ink;
+    }
+
     /* Silhouette, so it always reads as a sphere whatever the grid is doing. */
-    screen_circle(buf, BALL_CX, BALL_CY, r, 16);
+    screen_circle(buf, BALL_CX, cy, r, 16);
 
     int yaw = (int)(widget->yaw >> 4);
     int pitch = (int)(widget->pitch >> 4);
@@ -397,14 +401,8 @@ static void draw_globe(uint8_t *buf, const struct zmk_widget_nino *widget) {
      * that the grid does not wobble between frames. */
     int rm = r * 256;
 
-    /*
-     * The equator and the prime meridian are drawn solid, the rest through the
-     * dither at roughly half density. Without that contrast the grid is just a
-     * cloud of identical dots and the rotation is hard to read.
-     */
     for (int i = 0; i < 3; i++) {
         int lat = globe_latitudes[i];
-        uint8_t amp = (lat == 0) ? 16 : 9;
         int ring_y = (rm * fx_sin(lat)) >> 12;
         int ring_r = (rm * fx_cos(lat)) >> 12;
 
@@ -417,13 +415,12 @@ static void draw_globe(uint8_t *buf, const struct zmk_widget_nino *widget) {
             if (oz > 0) {
                 continue; /* Back of the sphere: hidden, so rotation reads. */
             }
-            screen_plot(buf, BALL_CX + (ox >> 8), BALL_CY + (oy >> 8), amp);
+            screen_plot(buf, BALL_CX + (ox >> 8), cy + (oy >> 8), 16);
         }
     }
 
     for (int i = 0; i < 4; i++) {
         int lon = globe_meridians[i];
-        uint8_t amp = (i == 0) ? 16 : 9;
         int cos_lon = fx_cos(lon);
         int sin_lon = fx_sin(lon);
 
@@ -438,9 +435,11 @@ static void draw_globe(uint8_t *buf, const struct zmk_widget_nino *widget) {
             if (oz > 0) {
                 continue;
             }
-            screen_plot(buf, BALL_CX + (ox >> 8), BALL_CY + (oy >> 8), amp);
+            screen_plot(buf, BALL_CX + (ox >> 8), cy + (oy >> 8), 16);
         }
     }
+
+    draw_ink = ink;
 }
 
 /* ------------------------------------------------------------------- test -- */
@@ -470,10 +469,19 @@ static void draw_test_pattern(uint8_t *buf) {
 
 /* ----------------------------------------------------------------- render -- */
 
-/* Flash the whole panel. Twice for the margin bell, once for a return. */
-static void nino_strike(struct zmk_widget_nino *widget, bool doubled) {
-    widget->strike_timer = doubled ? STRIKE_DOUBLE : STRIKE_SINGLE;
-    widget->strike_double = doubled;
+/*
+ * Flash the globe. extra queues further pulses once this one finishes, so the
+ * margin bell (two) is distinguishable from a knob click (one). Deliberately
+ * independent of the carriage: typing on through a ring must not cut it short.
+ */
+static void nino_globe_strike(struct zmk_widget_nino *widget, uint8_t extra) {
+    widget->globe_flash = GLOBE_FLASH_TOTAL;
+    widget->globe_flash_pending = extra;
+}
+
+static void nino_shake(struct zmk_widget_nino *widget, uint8_t frames, uint8_t mag) {
+    widget->shake_frames = frames;
+    widget->shake_mag = mag;
 }
 
 static void nino_return(struct zmk_widget_nino *widget);
@@ -486,11 +494,16 @@ static void nino_advance(struct zmk_widget_nino *widget) {
     widget->slamming = false;
     widget->carriage_pos = (int16_t)widget->column;
 
-    /* Ring once per line, on the way past the margin. Two strikes, so the
-     * margin warning is distinguishable from the single strike of a return. */
+    /* A nudge each time the carriage passes one of the long ruler ticks. */
+    if (widget->column > 0 && (widget->column % RULER_MAJOR) == 0) {
+        nino_shake(widget, TICK_SHAKE_FRAMES, TICK_SHAKE_MAG);
+    }
+
+    /* Ring once per line, on the way past the margin. Two pulses, so the
+     * warning is distinguishable from the single pulse of a knob click. */
     if (!widget->bell_rung && widget->column >= CONFIG_NINO_BELL_COLUMN) {
         widget->bell_rung = true;
-        nino_strike(widget, true);
+        nino_globe_strike(widget, 1);
     }
 
     /*
@@ -517,10 +530,12 @@ static void nino_return(struct zmk_widget_nino *widget) {
     widget->column = 0;
     widget->bell_rung = false;
     widget->slamming = true;
-    widget->shake_frames = CONFIG_NINO_SHAKE_FRAMES;
 
-    /* One whole-screen flash, against the bell's two. */
-    nino_strike(widget, false);
+    /* The slam owns the whole screen: a full-panel invert, a hard shake, and
+     * the globe kicked upward by the impact. */
+    widget->strike_timer = CONFIG_NINO_SLAM_FLASH_FRAMES;
+    widget->ball_recoil = CONFIG_NINO_BALL_RECOIL;
+    nino_shake(widget, CONFIG_NINO_SHAKE_FRAMES, CONFIG_NINO_SHAKE_MAG);
 }
 
 static void nino_render(lv_timer_t *timer) {
@@ -549,7 +564,7 @@ static void nino_render(lv_timer_t *timer) {
             }
             break;
         case NINO_INPUT_KNOB_CLICK:
-            widget->globe_flash = GLOBE_FLASH_TOTAL;
+            nino_globe_strike(widget, 0);
             break;
         default:
             break;
@@ -569,7 +584,8 @@ static void nino_render(lv_timer_t *timer) {
     }
 
     bool globe_moving = (widget->yaw != widget->yaw_target) ||
-                        (widget->pitch != widget->pitch_target) || (widget->globe_flash > 0);
+                        (widget->pitch != widget->pitch_target) || (widget->globe_flash > 0) ||
+                        (widget->globe_flash_pending > 0) || (widget->ball_recoil != 0);
     bool busy = had_input || widget->dirty || widget->test_pattern || globe_moving ||
                 widget->slamming || widget->splash_frames > 0 || widget->shake_frames > 0 ||
                 widget->strike_timer > 0;
@@ -583,17 +599,25 @@ static void nino_render(lv_timer_t *timer) {
      * Caps Lock inverts the whole panel. NINO_INVERT flips the convention if
      * the panel reads the other way round than expected.
      */
-    bool field_is_black = !caps;
+    bool field_is_black = true;
 #if IS_ENABLED(CONFIG_NINO_INVERT)
     field_is_black = !field_is_black;
 #endif
 
-    /* A strike flips every pixel: the cheapest whole-screen effect there is,
-     * since it is just the polarity the frame is cleared to. */
-    if (strike_inverted(widget->strike_timer, widget->strike_double)) {
+    /*
+     * The slam flips every pixel: the cheapest whole-screen effect there is,
+     * since it is only the polarity the frame is cleared to.
+     *
+     * These three effects each latch a "was running this frame" flag before
+     * they tick down. Without that, the last inverted frame decrements the
+     * timer to zero, dirty goes false, the next frame is skipped as idle, and
+     * the panel is left stuck inverted — which is exactly the white-screen
+     * hang. Owing one more frame after each effect ends fixes it for all of
+     * them, and it is independent of whatever the carriage is doing.
+     */
+    bool was_striking = (widget->strike_timer > 0);
+    if (was_striking) {
         field_is_black = !field_is_black;
-    }
-    if (widget->strike_timer > 0) {
         widget->strike_timer--;
     }
 
@@ -603,9 +627,11 @@ static void nino_render(lv_timer_t *timer) {
     draw_ink = (uint8_t)~background;
 
     /* The shake is a whole-screen offset, applied inside screen_plot. */
-    if (widget->shake_frames > 0) {
-        shake_dx = (widget->shake_frames & 1) ? 2 : -2;
-        shake_dy = (widget->shake_frames & 1) ? 1 : -1;
+    bool was_shaking = (widget->shake_frames > 0);
+    if (was_shaking) {
+        int mag = widget->shake_mag;
+        shake_dx = (widget->shake_frames & 1) ? mag : -mag;
+        shake_dy = (widget->shake_frames & 1) ? -mag : mag;
         widget->shake_frames--;
     } else {
         shake_dx = 0;
@@ -640,21 +666,32 @@ static void nino_render(lv_timer_t *timer) {
 
     /* Drawn before the decrement, so the flash gets its full two solid frames. */
     draw_globe(buf, widget);
-    if (widget->globe_flash > 0) {
+
+    bool was_flashing = (widget->globe_flash > 0);
+    if (was_flashing) {
         widget->globe_flash--;
+        if (widget->globe_flash == 0 && widget->globe_flash_pending > 0) {
+            widget->globe_flash_pending--;
+            widget->globe_flash = GLOBE_FLASH_TOTAL;
+        }
     }
 
-    lv_obj_invalidate(widget->obj);
+    /* The globe settles back down from the slam's kick. */
+    bool was_recoiling = (widget->ball_recoil != 0);
+    widget->ball_recoil = (int8_t)(widget->ball_recoil / 2);
 
-    globe_moving = (widget->yaw != widget->yaw_target) ||
-                   (widget->pitch != widget->pitch_target) || (widget->globe_flash > 0);
+    lv_obj_invalidate(widget->obj);
 
     widget->yaw = ease(widget->yaw, widget->yaw_target);
     widget->pitch = ease(widget->pitch, widget->pitch_target);
 
+    globe_moving = (widget->yaw != widget->yaw_target) ||
+                   (widget->pitch != widget->pitch_target) || (widget->globe_flash > 0) ||
+                   (widget->globe_flash_pending > 0);
+
     /* One more frame is owed once everything settles, to draw the resting state. */
-    widget->dirty = globe_moving || widget->slamming || widget->shake_frames > 0 ||
-                    widget->strike_timer > 0;
+    widget->dirty = globe_moving || widget->slamming || was_striking || was_shaking ||
+                    was_flashing || was_recoiling;
 }
 
 /* -------------------------------------------------------------- listeners -- */
@@ -776,9 +813,11 @@ int zmk_widget_nino_init(struct zmk_widget_nino *widget, lv_obj_t *parent) {
     widget->slamming = false;
     widget->bell_rung = false;
     widget->shake_frames = 0;
+    widget->shake_mag = 0;
     widget->strike_timer = 0;
-    widget->strike_double = false;
     widget->globe_flash = 0;
+    widget->globe_flash_pending = 0;
+    widget->ball_recoil = 0;
     widget->caps = false;
 
     widget->dirty = true;

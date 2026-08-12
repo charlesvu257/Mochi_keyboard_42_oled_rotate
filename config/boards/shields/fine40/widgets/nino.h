@@ -50,6 +50,7 @@ struct zmk_widget_nino {
     bool slamming;
     bool bell_rung;
     uint8_t shake_frames;
+    uint8_t shake_mag; /* pixels of offset: small for a ruler tick, big for a slam */
 
     /*
      * Globe orientation, in sixteenths of a sine-table step (1024 to the turn).
@@ -62,16 +63,18 @@ struct zmk_widget_nino {
     int32_t pitch;
     int32_t pitch_target;
 
-    /*
-     * A strike inverts the entire panel. The margin bell strikes twice, a
-     * carriage return once — the count is what tells them apart, since both
-     * use the whole screen.
-     */
+    /* Whole-screen invert. Used only by the carriage-return slam. */
     uint8_t strike_timer;
-    bool strike_double;
 
-    /* The globe's own local flash, for a knob click. */
+    /*
+     * The globe's local flash: one pulse for a knob click, two for the margin
+     * bell. Runs on its own clock so typing cannot cut it short.
+     */
     uint8_t globe_flash;
+    uint8_t globe_flash_pending;
+
+    /* The globe kicks upward when the carriage slams, then settles. */
+    int8_t ball_recoil;
 
     bool caps;
     bool dirty;
