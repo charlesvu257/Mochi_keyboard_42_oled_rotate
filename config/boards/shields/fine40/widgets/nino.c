@@ -263,7 +263,37 @@ static const uint8_t *const nino_letters[4] = {glyph_n, glyph_i, glyph_n, glyph_
 #define SPLASH_GAP 2
 #define SPLASH_BLOCK (4 * SPLASH_CELL + 3 * SPLASH_GAP)
 
-static void draw_splash(uint8_t *buf) {
+/*
+ * The name types itself in a letter at a time and is backspaced away again.
+ * Erasing runs at twice the speed of typing, the way a held backspace does.
+ */
+#define SPLASH_TYPE_FRAMES 6
+#define SPLASH_ERASE_FRAMES 3
+#define SPLASH_IN (4 * SPLASH_TYPE_FRAMES)
+#define SPLASH_OUT (4 * SPLASH_ERASE_FRAMES)
+
+/* How many of the four letters are on screen this frame. */
+static int splash_letters_shown(uint16_t remaining, uint16_t total) {
+    uint16_t elapsed = total - remaining;
+
+    if (elapsed < SPLASH_IN) {
+        return (elapsed / SPLASH_TYPE_FRAMES) + 1;
+    }
+    if (remaining <= SPLASH_OUT) {
+        /* Biased so each count holds for exactly SPLASH_ERASE_FRAMES and the
+         * run ends on blank frames — otherwise the last letter is still on
+         * screen when the splash hands over, and the name appears to snap
+         * away rather than finish. */
+        return (remaining - 1) / SPLASH_ERASE_FRAMES;
+    }
+    return 4;
+}
+
+static void draw_splash(uint8_t *buf, int letters, bool caret) {
+    if (letters <= 0) {
+        return;
+    }
+
     int top = (SCREEN_H - SPLASH_BLOCK) / 2;
     int left = (SCREEN_W - SPLASH_CELL) / 2;
 
@@ -271,7 +301,17 @@ static void draw_splash(uint8_t *buf) {
     screen_hline(buf, 2, SCREEN_W - 3, top - 6, 16);
     screen_hline(buf, 2, SCREEN_W - 3, top + SPLASH_BLOCK + 5, 16);
 
-    for (int letter = 0; letter < 4; letter++) {
+    /*
+     * The cursor waits at the top of the next empty cell rather than under the
+     * last filled one — below the fourth letter it would collide with the
+     * bottom rule.
+     */
+    if (caret && letters < 4) {
+        int cell_top = top + letters * (SPLASH_CELL + SPLASH_GAP);
+        screen_rect(buf, left, cell_top, SPLASH_CELL, 2, 16);
+    }
+
+    for (int letter = 0; letter < letters && letter < 4; letter++) {
         const uint8_t *rows = nino_letters[letter];
         int cell_top = top + letter * (SPLASH_CELL + SPLASH_GAP);
 
@@ -292,6 +332,22 @@ static void draw_splash(uint8_t *buf) {
 
 static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
     const int track_len = CONFIG_NINO_LINE_LENGTH;
+
+    /*
+     * Everything the carriage has already passed over is filled in, standing
+     * for text on the line. Dithered rather than solid: on a 1-bit panel a
+     * solid block would be as bright as the carriage bar itself and the two
+     * would read as one shape. A stipple sits visibly below it instead, which
+     * is as close to a second grey as this display gets.
+     *
+     * Drawn first so the ruler and the bar land on top of it, and it drains
+     * on its own during a slam — the fill is defined by where the carriage
+     * is, so the carriage flying home empties it without any extra state.
+     */
+    int filled_to = TRACK_TOP + widget->carriage_pos;
+    for (int y = TRACK_TOP; y < filled_to; y++) {
+        screen_hline(buf, 1, SCREEN_W - 2, y, CONFIG_NINO_FILL_AMP);
+    }
 
     /*
      * A ruler rather than a rail: one tick per five characters on each side,
@@ -639,10 +695,18 @@ static void nino_render(lv_timer_t *timer) {
     }
 
     if (widget->splash_frames > 0) {
+        int letters = splash_letters_shown(widget->splash_frames, widget->splash_total);
+        /* No cursor while backspacing — it only belongs where typing is still
+         * expected to happen. */
+        bool caret = (widget->splash_frames > SPLASH_OUT) && (((widget->splash_frames / 4) & 1) != 0);
+
+        draw_splash(buf, letters, caret);
         widget->splash_frames--;
-        draw_splash(buf);
+
         lv_obj_invalidate(widget->obj);
-        widget->dirty = (widget->splash_frames == 0);
+        /* Always owe another frame: the splash is animating every frame, and
+         * the one after it ends has to draw the real screen. */
+        widget->dirty = true;
         return;
     }
 
@@ -815,7 +879,15 @@ int zmk_widget_nino_init(struct zmk_widget_nino *widget, lv_obj_t *parent) {
 
     widget->dirty = true;
     widget->test_pattern = IS_ENABLED(CONFIG_NINO_TEST_PATTERN);
-    widget->splash_frames = CONFIG_NINO_SPLASH_MS / CONFIG_NINO_FRAME_MS;
+    /* Typing in and backspacing out are fixed costs; whatever is left over is
+     * hold time. Clamped so a short SPLASH_MS truncates the hold rather than
+     * cutting the animation itself in half. */
+    uint16_t frames = CONFIG_NINO_SPLASH_MS / CONFIG_NINO_FRAME_MS;
+    if (frames < SPLASH_IN + SPLASH_OUT) {
+        frames = SPLASH_IN + SPLASH_OUT;
+    }
+    widget->splash_frames = frames;
+    widget->splash_total = frames;
 
     /* Start off-axis so the globe reads as a sphere from the first frame. */
     widget->yaw = widget->yaw_target = 5 * 16;

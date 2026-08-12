@@ -41,7 +41,10 @@ struct zmk_widget_nino {
      */
     lv_color_t cbuf[NINO_FB_W * NINO_FB_H];
 
+    /* Counts down. splash_total is kept so the phase can be worked out from
+     * how much has elapsed rather than tracked separately. */
     uint16_t splash_frames;
+    uint16_t splash_total;
 
     /* Carriage. column is the logical count; carriage_pos is what is drawn,
      * which lags behind during a slam. */

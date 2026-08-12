@@ -86,6 +86,15 @@ config NINO_LINE_LENGTH
 	  carriage track in pixels. Must fit between NINO_TRACK_TOP and the
 	  globe; on a 128-pixel-tall panel, 72 leaves comfortable room.
 
+config NINO_FILL_AMP
+	int "Density of the written-text fill behind the carriage, 0-16"
+	default 6
+	range 0 16
+	help
+	  Dither amplitude, where 16 is solid. Around 6 reads as a light grey.
+	  Push it much higher and it stops being distinguishable from the
+	  carriage bar; 0 turns the fill off.
+
 config NINO_BELL_COLUMN
 	int "Column at which the margin bell rings"
 	default 65
