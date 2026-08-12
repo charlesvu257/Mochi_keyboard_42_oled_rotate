@@ -1,7 +1,7 @@
 if SHIELD_fine40
 
 config ZMK_KEYBOARD_NAME
-    default "fine!40"
+    default "NINO"
 
 config I2C
 	default y
@@ -9,168 +9,147 @@ config I2C
 config SSD1306
 	default y
 
-# --- Custom OLED status screen: full-screen keystroke ripple ---
+# --- Custom OLED status screen ---
 
 choice ZMK_DISPLAY_STATUS_SCREEN
 	default ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
 endchoice
 
 config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
-	imply FINE40_RIPPLE
+	imply NINO_DISPLAY
 
 config LV_Z_MEM_POOL_SIZE
 	default 4096 if ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
 
-# Animating at 20fps on the main thread would add latency to keypresses.
+# Animating at 25fps on the main thread would add latency to keypresses.
 choice ZMK_DISPLAY_WORK_QUEUE
 	default ZMK_DISPLAY_WORK_QUEUE_DEDICATED
 endchoice
 
-config FINE40_RIPPLE
-	bool "Full-screen keystroke ripple status screen"
+config NINO_DISPLAY
+	bool "NINO status screen: splash, carriage, margin bell, globe"
 	select LV_USE_CANVAS
 	select LV_USE_IMG
 	select ZMK_HID_INDICATORS
 	help
-	  Every key press sends an expanding wavefront out from the point on the
-	  OLED matching that physical key. Caps Lock inverts the whole panel.
+	  Boot splash spelling NINO, a typewriter carriage that steps one pixel
+	  per character, a margin bell, a carriage-return slam with screen shake,
+	  and a wireframe globe driven by the encoder.
 
-if FINE40_RIPPLE
+if NINO_DISPLAY
 
-config FINE40_RIPPLE_CUBE
-	bool "Wireframe cube in the middle of the panel"
-	default y
-	help
-	  A 3D wireframe cube sits permanently at the centre and turns when the
-	  knob clicks, following the encoder's keymap bindings: the base layer
-	  moves left and right so the cube yaws, any layer above moves up and
-	  down so it pitches. Drawn solid, on top of the wave field.
-
-config FINE40_RIPPLE_PANEL_ROTATED
+config NINO_PANEL_ROTATED
 	bool "Panel is mounted a quarter turn over"
 	default y
 	help
 	  The framebuffer is always 128x32, but this module is mounted portrait,
-	  so on the glass the 128-pixel axis runs top to bottom. The cube needs
-	  to know, or a yaw would show up as a tumble. Turn off for a panel
+	  so on the glass the 128-pixel axis runs top to bottom. Everything is
+	  drawn in screen space and rotated on the way out. Turn off for a panel
 	  mounted the normal way round.
 
-config FINE40_CUBE_INVERT
-	bool "Reverse which way the knob turns the cube"
-	default y
-	depends on FINE40_RIPPLE_CUBE
+config NINO_PANEL_FLIP
+	bool "Rotate the other way"
+	depends on NINO_PANEL_ROTATED
 	help
-	  Whether a clockwise detent reports as positive depends on how the
-	  encoder is wired, and this board reports it backwards — hence the
-	  default. Clear it if the cube turns against the knob.
+	  Which of the two quarter turns a rotated panel sits at cannot be known
+	  from the devicetree. If the splash reads upside down, set this.
 
-config FINE40_CUBE_SCALE
-	int "Cube size, as a projection scale factor"
-	default 22
+config NINO_INVERT
+	bool "Swap ink and background"
 	help
-	  Larger is bigger. Hard-capped by the panel's short axis: at 22 the
-	  cube spans about 26 of the 32 available pixels at its widest
-	  orientation, so there is not much room above this before corners
-	  start clipping.
+	  Normally the panel is dark with light pixels, inverting while Caps Lock
+	  is on. Enable this if it reads the other way round on your hardware.
 
-config FINE40_CUBE_STEP
+config NINO_FRAME_MS
+	int "Frame interval in milliseconds"
+	default 40
+	help
+	  40ms is 25fps. Pushing a 512-byte 128x32 frame over I2C at 400kHz costs
+	  roughly 12ms, so there is room here.
+
+# --- Boot splash ---
+
+config NINO_SPLASH_MS
+	int "How long the NINO splash stays up, in milliseconds"
+	default 2500
+	help
+	  Any keypress or knob movement dismisses it early.
+
+# --- Carriage ---
+
+config NINO_LINE_LENGTH
+	int "Characters in a line before the carriage stops advancing"
+	default 72
+	help
+	  One pixel of travel per character, so this is also the length of the
+	  carriage track in pixels. Must fit between NINO_TRACK_TOP and the
+	  globe; on a 128-pixel-tall panel, 72 leaves comfortable room.
+
+config NINO_BELL_COLUMN
+	int "Column at which the margin bell rings"
+	default 65
+	help
+	  Rings once per line, on the way past. Backspacing below it re-arms it.
+
+config NINO_SLAM_SPEED
+	int "Carriage return speed, in pixels per frame"
+	default 24
+	help
+	  The carriage advances one pixel per character but returns at this
+	  speed, so a full line snaps back in about three frames.
+
+config NINO_SHAKE_FRAMES
+	int "Frames of screen shake on carriage return"
+	default 2
+
+# --- Globe ---
+
+config NINO_BALL_RADIUS
+	int "Globe radius in pixels"
+	default 12
+	help
+	  Capped by the panel's short axis: at 12 the globe spans 25 of the 32
+	  available pixels.
+
+config NINO_BALL_STEP
 	int "Rotation per detent, in sixteenths of a sine-table step"
 	default 64
 	help
-	  There are 1024 units to a full turn, so the default of 64 is an
-	  eighth turn, 22.5 degrees, per click.
+	  There are 1024 units to a full turn, so the default of 64 is an eighth
+	  turn, 22.5 degrees, per click.
 
-config FINE40_CUBE_MIN_MS
+config NINO_BALL_INVERT
+	bool "Reverse which way the knob turns the globe"
+	default y
+	help
+	  Whether a clockwise detent reports as positive depends on how the
+	  encoder is wired, and this board reports it backwards — hence the
+	  default. Clear it if the globe turns against the knob.
+
+config NINO_BALL_MIN_MS
 	int "Shortest gap between knob nudges, in milliseconds"
 	default 60
 	help
 	  Rate limit for encoder events, which may arrive several times per
 	  detent depending on the encoder's resolution.
 
-config FINE40_RIPPLE_INVERT
-	bool "Swap ripple and background colours"
+config NINO_KNOB_POSITION
+	int "Keymap position of the encoder push-switch"
+	default 47
 	help
-	  Normally the field is black with white ripples, inverting to white with
-	  black ripples while Caps Lock is on. Enable this if the panel reads the
-	  other way round on your hardware.
+	  Clicking it flashes the globe. It is also bound to Return, so a click
+	  fires the carriage slam at the same time.
 
-config FINE40_RIPPLE_CAPS_SHOCKWAVE
-	bool "Emit a ripple from the centre when Caps Lock toggles"
-	default y
+# --- Diagnostics ---
 
-config FINE40_RIPPLE_FRAME_MS
-	int "Frame interval in milliseconds"
-	default 40
-	help
-	  40ms is 25fps. Pushing a 512-byte 128x32 frame over I2C at 400kHz costs
-	  roughly 12ms, so there is room here, but the bus is shared with nothing
-	  else and there is no reason to run it hotter than the eye needs.
-
-config FINE40_RIPPLE_SPEED_X10
-	int "Wavefront speed, in tenths of a pixel per frame"
-	default 12
-	help
-	  Lifetime in frames is MAX_RADIUS divided by this, so slowing the wave
-	  down is the cheap way to make ripples last longer: it costs nothing
-	  extra to draw, unlike raising MAX_RADIUS.
-
-config FINE40_RIPPLE_MAX_RADIUS
-	int "Radius at which a wavefront has spent all its energy"
-	default 64
-	help
-	  Roughly two panel heights, so a wave crosses and bounces a couple of
-	  times before it dies. Without reflection enabled this wants to be near
-	  the panel's short dimension instead, or a wave spends most of its life
-	  with the top and bottom of the ring off-screen, leaving only the left
-	  and right arcs visible — which reads as horizontal stretching.
-
-config FINE40_RIPPLE_WAVELENGTH
-	int "Pixels between concentric wavefronts of one impact"
-	default 6
-
-config FINE40_RIPPLE_MAX_ACTIVE
-	int "Maximum simultaneous ripples"
-	default 10
-	help
-	  Once this many are in flight, a new key press recycles the oldest,
-	  which looks like a ripple vanishing mid-life. This has to scale with
-	  lifetime: at roughly two seconds per ripple, normal typing keeps about
-	  ten alive at once. Each ripple costs five rings (its own plus four
-	  reflections), so this is also the first knob to turn down if the
-	  animation stutters.
-
-config FINE40_RIPPLE_REFLECT_PCT
-	int "Energy retained when a wave bounces off a wall, in percent"
-	default 70
-	range 0 100
-	help
-	  0 disables reflection, and waves simply run off the edge of the panel.
-
-config FINE40_RIPPLE_INTERFERENCE
-	bool "Let overlapping wavefronts cancel each other"
-	default y
-	help
-	  Draws wavefronts by inverting pixels rather than setting them, so two
-	  waves crossing cancel where they meet. Turn off for plain stacking.
-
-config FINE40_RIPPLE_ASPECT_PCT
-	int "Horizontal wave radius as a percentage of the vertical radius"
-	default 100
-	range 10 200
-	help
-	  Correction for panels whose pixels are not square. 100 draws true
-	  circles in pixel space. If circles come out as wide ovals, lower this;
-	  a panel with pixels twice as wide as they are tall wants 50. Enable
-	  FINE40_RIPPLE_TEST_PATTERN to measure it.
-
-config FINE40_RIPPLE_TEST_PATTERN
-	bool "Show a panel geometry check until the first key press"
+config NINO_TEST_PATTERN
+	bool "Show a panel geometry check instead of the normal screen"
 	help
 	  Draws the panel edges, a square, and a circle inscribed in that square.
 	  On correct geometry the rectangle sits exactly on the glass edges and
 	  the circle touches the square at the midpoint of each side.
 
-endif # FINE40_RIPPLE
+endif # NINO_DISPLAY
 
 if LVGL
 
