@@ -171,6 +171,38 @@ config NINO_TEST_PATTERN
 
 endif # NINO_DISPLAY
 
+# --- Note storage and host link ---
+
+config NINO_NOTES
+	bool "Carry notes in flash, transferred over USB serial"
+	default y
+	select FLASH
+	select FLASH_MAP
+	select RING_BUFFER
+	select SERIAL
+	select UART_INTERRUPT_DRIVEN
+	select USB_DEVICE_STACK
+	select USB_CDC_ACM
+	help
+	  Claims nino_partition (344K) as a raw flash store and exposes a second
+	  CDC ACM port for the host to fill it. The firmware never parses what it
+	  holds — it counts bytes, checks a CRC, and hands them back.
+
+if NINO_NOTES
+
+config NINO_LINK_STACK_SIZE
+	int "Stack for the host link thread"
+	default 2048
+
+config NINO_LINK_PRIORITY
+	int "Priority of the host link thread"
+	default 7
+	help
+	  Below the keyboard scanning threads. A note transfer must never be able
+	  to add latency to a keystroke.
+
+endif # NINO_NOTES
+
 if LVGL
 
 # The whole panel is redrawn every frame, so render it in a single pass rather

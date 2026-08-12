@@ -144,8 +144,15 @@ default_transform: keymap_transform_0 {
  * reserved for the softdevice, above it is the Adafruit bootloader. Only the
  * boundary between the two middle partitions is ours to move.
  *
+ * Notes get their OWN partition rather than sharing storage_partition. That is
+ * not a preference: Zephyr's settings backend claims storage_partition
+ * outright (FIXED_PARTITION_ID(storage_partition) in settings_nvs.c), and NVS
+ * cannot coexist with raw flash writes in the same region. So settings keep
+ * their original 32K and the rest becomes ours.
+ *
  *   0x26000 + 0x70000 = 0x96000   448K firmware (281K used before BLE was cut)
- *   0x96000 + 0x5E000 = 0xF4000   376K storage
+ *   0x96000 + 0x08000 = 0x9E000    32K settings — NVS, untouched by us
+ *   0x9E000 + 0x56000 = 0xF4000   344K notes — raw flash, 86 whole pages
  *
  * NOTE: this wipes settings. NVS now starts at a different address, so ZMK
  * reads blank flash on first boot — Studio's saved keymap is gone and the
@@ -162,8 +169,24 @@ default_transform: keymap_transform_0 {
 		};
 
 		storage_partition: partition@96000 {
-			reg = <0x00096000 0x0005e000>;
+			reg = <0x00096000 0x00008000>;
 		};
+
+		nino_partition: partition@9e000 {
+			reg = <0x0009e000 0x00056000>;
+		};
+	};
+};
+
+/*
+ * A second CDC ACM, alongside the one the studio-rpc-usb-uart snippet already
+ * creates. The host sees two serial ports: Studio owns the first, note
+ * transfer owns this one. Sharing a single port would mean multiplexing two
+ * unrelated protocols over it for no gain.
+ */
+&zephyr_udc0 {
+	nino_cdc: nino_cdc {
+		compatible = "zephyr,cdc-acm-uart";
 	};
 };
 
