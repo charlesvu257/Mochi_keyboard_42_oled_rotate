@@ -63,12 +63,15 @@ struct zmk_widget_nino {
     int32_t pitch_target;
 
     /*
-     * The globe is the bell. flash_frames runs one strike; pending_flashes
-     * queues more, so the margin bell can ring twice where a slam or a knob
-     * click strikes once.
+     * A strike inverts the entire panel. The margin bell strikes twice, a
+     * carriage return once — the count is what tells them apart, since both
+     * use the whole screen.
      */
-    uint8_t flash_frames;
-    uint8_t pending_flashes;
+    uint8_t strike_timer;
+    bool strike_double;
+
+    /* The globe's own local flash, for a knob click. */
+    uint8_t globe_flash;
 
     bool caps;
     bool dirty;
