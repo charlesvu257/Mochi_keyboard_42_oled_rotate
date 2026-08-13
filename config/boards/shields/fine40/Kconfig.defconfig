@@ -27,14 +27,14 @@ choice ZMK_DISPLAY_WORK_QUEUE
 endchoice
 
 config NINO_DISPLAY
-	bool "NINO status screen: splash, carriage, margin bell, globe"
+	bool "NINO status screen: splash, carriage, globe"
 	select LV_USE_CANVAS
 	select LV_USE_IMG
 	select ZMK_HID_INDICATORS
 	help
-	  Boot splash spelling NINO, a typewriter carriage that steps one pixel
-	  per character, a margin bell, a carriage-return slam with screen shake,
-	  and a wireframe globe driven by the encoder.
+	  Boot splash spelling NINO, a typewriter carriage that fills the track
+	  a pass at a time and ripples on every space, a carriage-return slam
+	  with screen shake, and a wireframe globe driven by the encoder.
 
 if NINO_DISPLAY
 
@@ -63,10 +63,29 @@ config NINO_INVERT
 
 config NINO_FRAME_MS
 	int "Frame interval in milliseconds"
-	default 40
+	default 28
 	help
-	  40ms is 25fps. Pushing a 512-byte 128x32 frame over I2C at 400kHz costs
-	  roughly 12ms, so there is room here.
+	  28ms is about 36fps. Pushing a 512-byte 128x32 frame over I2C at
+	  400kHz costs roughly 12ms, so this still leaves better than half the
+	  interval idle. Latency is most of what makes the panel feel connected
+	  to the keys, so this is worth spending.
+
+	  Every duration in the widget is counted in frames, not milliseconds.
+	  Change this and the shake, slam, ripple and flash lengths below all
+	  need rescaling to match, or the whole screen simply gets twitchier.
+
+config NINO_TEMPORAL_DITHER
+	bool "Alternate the dither half a level each frame"
+	default y
+	help
+	  The 4x4 Bayer matrix can only hold 17 densities. Nudging the threshold
+	  by half a level on alternate frames doubles that, which is what keeps
+	  successive cartridge passes distinguishable from one another.
+
+	  The cost is that cells sitting exactly on a half-level toggle at half
+	  the frame rate. That is a small fraction of the pixels and should read
+	  as texture rather than flicker, but it is display-dependent — turn
+	  this off if it shimmers on the glass.
 
 # --- Boot splash ---
 
@@ -74,56 +93,103 @@ config NINO_SPLASH_MS
 	int "How long the NINO splash stays up, in milliseconds"
 	default 2500
 	help
+	  The platen seating, the four hammer strikes and the carriage return
+	  that hands over to the real screen are fixed costs of about 1.5s at
+	  the default frame rate; whatever is left over is hold time under a
+	  blinking caret. Setting this below the fixed cost truncates the hold
+	  rather than speeding the mechanism up.
+
 	  Any keypress or knob movement dismisses it early.
 
 # --- Carriage ---
 
-config NINO_LINE_LENGTH
-	int "Characters in a line before the carriage stops advancing"
+config NINO_TRACK_LENGTH
+	int "Length of the carriage track, in pixels"
 	default 72
 	help
-	  One pixel of travel per character, so this is also the length of the
-	  carriage track in pixels. Must fit between NINO_TRACK_TOP and the
-	  globe; on a 128-pixel-tall panel, 72 leaves comfortable room.
+	  Must fit between TRACK_TOP and the globe; on a 128-pixel-tall panel,
+	  72 leaves comfortable room. A cartridge's worth of characters is
+	  mapped onto this many pixels, so the two are set independently.
 
-config NINO_FILL_AMP
-	int "Density of the written-text fill behind the carriage, 0-16"
-	default 6
-	range 0 16
+config NINO_CARTRIDGE_CHARS
+	int "Characters in one cartridge pass"
+	default 100
 	help
-	  Dither amplitude, where 16 is solid. Around 6 reads as a light grey.
-	  Push it much higher and it stops being distinguishable from the
-	  carriage bar; 0 turns the fill off.
+	  When this many characters have been typed the bar returns to the top
+	  by itself and starts a fresh pass in a heavier texture. It does not
+	  slam — only Return or the encoder click does that.
 
-config NINO_BELL_COLUMN
-	int "Column at which the margin bell rings"
-	default 65
+config NINO_FILL_AMP_BASE
+	int "Density of the first pass's fill, 0-32"
+	default 4
+	range 0 32
 	help
-	  Rings once per line, on the way past. Backspacing below it re-arms it.
+	  Dither amplitude, where 32 is solid. The first pass should be thin
+	  enough to read as a faint texture rather than as written text. Odd
+	  values land between two Bayer levels and need NINO_TEMPORAL_DITHER to
+	  render as anything distinct.
+
+config NINO_FILL_AMP_STEP
+	int "How much denser each further pass draws"
+	default 5
+	range 0 32
+	help
+	  Added to the base for every completed cartridge, so successive passes
+	  lay down a visibly thicker texture over the last one. An odd step
+	  makes every other pass land on a half-level, which is the finest
+	  gradation the panel can express.
+
+config NINO_FILL_AMP_MAX
+	int "Ceiling on the fill density, 0-32"
+	default 24
+	range 0 32
+	help
+	  Passes stop getting denser here. Kept below 32 so the fill never
+	  becomes as bright as the carriage bar itself and the two keep reading
+	  as separate things.
+
+config NINO_PRESS_DIP
+	int "Pixels the carriage sinks while a key is held"
+	default 1
+	help
+	  Driven by the physical matrix rather than by keycodes, so it follows
+	  your fingers rather than the text: the bar sits low for exactly as
+	  long as something is held down. One pixel is enough — this fires on
+	  every keystroke, and anything larger reads as a twitch.
 
 config NINO_SLAM_SPEED
 	int "Carriage return speed, in pixels per frame"
-	default 24
+	default 17
 	help
-	  The carriage advances one pixel per character but returns at this
-	  speed, so a full line snaps back in about three frames.
+	  The carriage creeps down the track as you type but returns at this
+	  speed, so a full track snaps back in about four frames.
+
+config NINO_SLAM_BOUNCE
+	int "Pixels the carriage overshoots the stop before springing back"
+	default 3
+	help
+	  A carriage that halts exactly at zero reads as a jump cut. Driving
+	  past the stop and settling back over two frames is what makes the
+	  return land as an impact. Set to 0 for a hard stop.
 
 config NINO_SLAM_FLASH_FRAMES
 	int "Frames the whole panel inverts on carriage return"
-	default 5
+	default 7
 	help
-	  The slam owns the whole screen. The margin bell only flashes the globe,
-	  which keeps the common event quiet and the rare one loud.
+	  The slam owns the whole screen, which is what keeps it distinct from
+	  the small local effects — the space ripple and the ruler nudges.
 
 config NINO_SHAKE_FRAMES
 	int "Frames of screen shake on carriage return"
-	default 5
+	default 7
 
 config NINO_SHAKE_MAG
 	int "Pixels of screen offset during a carriage-return shake"
 	default 3
 	help
-	  Ruler ticks get a fixed one-pixel nudge; this is only the slam.
+	  The slam shakes across the track, since that is the way the carriage
+	  is travelling; ruler ticks and backspaces jolt along it instead, at a
+	  fixed one pixel. Direction is what tells them apart, not size.
 
 config NINO_BALL_RECOIL
 	int "Pixels the globe kicks upward when the carriage slams"
@@ -162,12 +228,31 @@ config NINO_BALL_MIN_MS
 	  Rate limit for encoder events, which may arrive several times per
 	  detent depending on the encoder's resolution.
 
+config NINO_IDLE_MS
+	int "Quiet time before the globe starts turning by itself"
+	default 8000
+	help
+	  Any keypress or knob movement stops it where it stands. Only the globe
+	  moves: the track is holding your cartridge progress, and animating
+	  that would throw information away for the sake of decoration.
+
+config NINO_IDLE_SPIN
+	int "Idle rotation per frame, in sixteenths of a sine-table step"
+	default 1
+	help
+	  1024 units to a full turn, so at the default frame rate 1 works out at
+	  a revolution roughly every 29 seconds. Set to 0 to disable the idle
+	  animation and let the panel go quiet instead — worth doing on battery,
+	  since idle spin means the display never stops being redrawn.
+
 config NINO_KNOB_POSITION
 	int "Keymap position of the encoder push-switch"
 	default 47
 	help
-	  Clicking it flashes the globe. It is also bound to Return, so a click
-	  fires the carriage slam at the same time.
+	  Clicking it flashes the globe and fires the carriage slam, which is
+	  the only thing besides Return that resets the cartridge. The keymap
+	  also binds it to Return; firing the slam from here as well keeps the
+	  knob working if that binding changes.
 
 # --- Diagnostics ---
 
