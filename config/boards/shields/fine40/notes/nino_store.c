@@ -148,6 +148,10 @@ int nino_store_begin(uint32_t total, uint32_t expected_crc) {
         return rc;
     }
 
+    /* A new blob makes any previous read's progress meaningless. */
+    reading.last_ms = 0;
+    reading.high_water = 0;
+
     incoming.active = true;
     incoming.declared_total = total;
     incoming.declared_crc = expected_crc;
@@ -269,6 +273,38 @@ int nino_store_commit(uint32_t *actual_crc) {
     return 0;
 }
 
+/*
+ * Reads leave no session behind them, so "is a read happening" is a question
+ * about recency rather than state. A gap longer than this and destow has
+ * either finished or given up; either way the panel should stop saying so.
+ */
+#define READ_IDLE_MS 600
+
+static struct {
+    int64_t last_ms;
+    size_t high_water;
+} reading;
+
+bool nino_store_busy(void) { return incoming.active; }
+
+bool nino_store_reading(void) {
+    return reading.last_ms != 0 && (k_uptime_get() - reading.last_ms) < READ_IDLE_MS;
+}
+
+uint8_t nino_store_read_progress(void) {
+    if (!committed.valid || committed.length == 0) {
+        return 0;
+    }
+    return (uint8_t)(((uint64_t)reading.high_water * 255U) / committed.length);
+}
+
+uint8_t nino_store_progress(void) {
+    if (!incoming.active || incoming.declared_total == 0) {
+        return 0;
+    }
+    return (uint8_t)(((uint64_t)incoming.received * 255U) / incoming.declared_total);
+}
+
 int nino_store_read(size_t offset, uint8_t *buf, size_t len) {
     if (!committed.valid) {
         return -ENOENT;
@@ -276,5 +312,11 @@ int nino_store_read(size_t offset, uint8_t *buf, size_t len) {
     if (offset + len > committed.length) {
         return -EINVAL;
     }
+
+    reading.last_ms = k_uptime_get();
+    if (offset + len > reading.high_water) {
+        reading.high_water = offset + len;
+    }
+
     return flash_area_read(store_area, HEADER_SIZE + offset, buf, len);
 }

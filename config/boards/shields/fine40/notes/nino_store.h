@@ -46,3 +46,22 @@ int nino_store_commit(uint32_t *actual_crc);
 
 /* Read committed bytes. Offsets are relative to the blob, not the partition. */
 int nino_store_read(size_t offset, uint8_t *buf, size_t len);
+
+/* True between begin and commit — the host is writing right now. */
+bool nino_store_busy(void);
+
+/*
+ * True while the host is reading. There is no session to bracket it — READ is
+ * stateless by design — so this is inferred from how recently one arrived.
+ */
+bool nino_store_reading(void);
+
+/* How far through that read, as 0..255, by highest offset asked for. */
+uint8_t nino_store_read_progress(void);
+
+/*
+ * How far through that transfer, as 0..255. Only meaningful while busy. Scaled
+ * rather than returned as a pair of byte counts so the caller never has to
+ * divide, and never has to worry about a zero total.
+ */
+uint8_t nino_store_progress(void);

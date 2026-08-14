@@ -33,6 +33,12 @@
 #include <zmk/keymap.h>
 
 #include "nino.h"
+#include "nino_font.h"
+
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+#include "../notes/nino_destow.h"
+#include "../notes/nino_store.h"
+#endif
 
 #define FB_W NINO_FB_W
 #define FB_H NINO_FB_H
@@ -53,6 +59,8 @@
 #define KC_ENTER 0x28
 #define KC_BACKSPACE 0x2A
 #define KC_SPACE 0x2C
+#define KC_LSHIFT 0xE1
+#define KC_RSHIFT 0xE5
 
 /* Layout, in screen space. The track starts near the top: there is nothing
  * above it to leave room for. */
@@ -83,25 +91,91 @@
  */
 #define GLOBE_FLASH_TOTAL 12
 
-/* A ruler tick every this many pixels of track, and a nudge when a long one is
- * crossed. Pixels rather than characters: the ticks have to line up with what
- * is drawn, and a character is now less than a pixel of travel. */
-#define RULER_MINOR 5
-#define RULER_MAJOR 25
-#define TICK_SHAKE_FRAMES 3
-#define TICK_SHAKE_MAG 1
+/*
+ * The distance mark: every so many detents the globe rings once and the panel
+ * ticks. A sense of how far has been turned, which a freely spinning ball
+ * cannot give on its own.
+ *
+ * Three frames of a solid ring stepping outward — solid rather than fading,
+ * because the ring is the machine and mechanism does not dither. The tick jolts
+ * along the track, not across it, so it can never be mistaken for a slam.
+ */
+#define ORB_RING_FRAMES 3
+#define ORB_RING_STEP 2
+#define ORB_TICK_FRAMES 2
+#define ORB_TICK_MAG 1
 
 /* Backspace flips the chevron for this long, so erasing does not feel like
  * typing played backwards. */
 #define ERASE_FRAMES 3
 
 /*
- * The space bar's ripple off the arrow: a ring widening and fading over about
- * 170ms. Kept small and short because a space is the most common key there is
- * — anything longer or larger would be on screen permanently while typing.
+ * THE MATERIALS
+ *
+ * Three, and everything drawn on this panel is exactly one of them.
+ *
+ *   MECHANISM — solid, and perfectly still. The carriage bar, the ruler, the
+ *     end stop, the wrap sweep, the store gauge. Machined parts do not have
+ *     texture and they do not drift.
+ *
+ *   INK — dithered, and slowly flowing. Only the track fill. The dither matrix
+ *     is sampled through an offset that creeps a cell at a time, so the texture
+ *     migrates across the paper instead of sitting on it.
+ *
+ *     The distinction that makes this work rather than look broken: incoherent
+ *     per-pixel toggling reads as flicker, which is a fault. Coherent motion of
+ *     a whole pattern reads as flow, which is a material. The old temporal
+ *     dither was the former and had to go; this is the latter, and it is the
+ *     same mechanism used honestly.
+ *
+ *   DRIED INK — the pass pips. Ink that has stopped moving: the same dither
+ *     family as the fill, at the top of the ladder, but fixed in place. A
+ *     record of ink rather than ink, which is exactly what a pass count is.
+ *
+ * On a 1-bit panel contrast is the entire budget. Anything added later picks
+ * one of the three.
  */
-#define RIPPLE_TOTAL 6
-#define RIPPLE_FADE 5
+
+/*
+ * Ink drift. One cell of the matrix every INK_DRIFT_FRAMES, diagonally, so the
+ * texture crawls rather than scans. Slow on purpose — fast enough to be alive
+ * when you look at it, slow enough that it never competes with the carriage.
+ */
+#define INK_DRIFT_FRAMES 9
+
+/*
+ * The ruler is graduated in characters, and passing a graduation strikes it:
+ * the mark reaches further into the track for a few frames. Same furniture,
+ * momentarily emphasised — not a second mark drawn beside it. Brightness is
+ * not available for this, because mechanism is always solid.
+ */
+#define TICK_FLASH_FRAMES 4
+#define TICK_DASH 3
+#define TICK_DASH_STRUCK 8
+
+/* Dried ink: the top of the ladder, which puts 2-3 lit cells in every 2x2 —
+ * always visible however a pip lands on the matrix, and still textured. */
+#define PIP_AMP AMP_LEVEL(10)
+#define PIP_SIZE 2
+
+/*
+ * The cartridge reaching its end: a rule sweeping up the track from the stop to
+ * the top, which is the platen taking the page back. Not an event in the sense
+ * the slam is — no invert, no shake, nothing that demands attention — but a
+ * whole-track movement, which is impossible to miss and over in a quarter of a
+ * second.
+ */
+#define WRAP_SWEEP_FRAMES 7
+
+/*
+ * One pip per completed pass, in rows under the track. The fill ladder runs out
+ * of density after eight passes; the pips do not, so the panel keeps saying how
+ * much has been written long after the texture has stopped changing.
+ */
+#define PASS_PIP_STRIDE 3
+#define PASS_PIPS_PER_ROW 10
+#define PASS_PIP_ROWS 2
+#define PASS_MAX (PASS_PIPS_PER_ROW * PASS_PIP_ROWS)
 
 /*
  * Typing heat: every character adds HEAT_PER_KEY, and it drains proportionally
@@ -125,11 +199,24 @@
 #define NINO_IDLE_FRAMES (CONFIG_NINO_IDLE_MS / CONFIG_NINO_FRAME_MS)
 
 /*
- * 4x4 ordered dither on a doubled scale: the matrix supplies even thresholds
- * 0..30 against an amplitude of 0..AMP_SOLID, so AMP_SOLID is solid and 0 is
- * empty. The odd amplitudes in between are the point — see dither_phase.
+ * 4x4 ordered dither, purely spatial. The matrix supplies thresholds 0..30 in
+ * steps of two against an amplitude of 0..AMP_SOLID, so a pixel lights when its
+ * threshold is under the amplitude and the number of lit cells in each 4x4 is
+ * exactly amp/2. That gives sixteen honest levels, every one of them a fixed
+ * pattern that does not move between frames.
+ *
+ * There was a temporal dither here — half a level added on alternate frames to
+ * squeeze a seventeenth grey out of the matrix. It is gone. Flicker fusion at
+ * 25fps is marginal at the best of times, and on a panel this small a texture
+ * that shimmers reads as a fault rather than as a shade.
  */
 #define AMP_SOLID 32
+
+/* Ten fill levels, one to ten cells of every sixteen. Ten is where the ladder
+ * has to stop: at eleven the fill is close enough to the solid bar that the
+ * two stop reading as different materials. */
+#define AMP_LEVEL(n) ((n) * 2)
+#define NINO_FILL_LEVELS 10
 
 static const uint8_t bayer4[4][4] = {
     {0, 8, 2, 10},
@@ -161,18 +248,46 @@ static atomic_t caps_lock_on = ATOMIC_INIT(0);
  */
 static atomic_t keys_held = ATOMIC_INIT(0);
 
+/*
+ * The destow chord: Space and Shift held, then the knob clicked. Tracked from
+ * keycodes rather than positions so it follows the keys wherever the keymap
+ * puts them, and because both of these are things the user is aware of holding.
+ */
+static atomic_t space_held = ATOMIC_INIT(0);
+static atomic_t shift_held = ATOMIC_INIT(0);
+
 static uint8_t draw_ink;
 static int8_t shake_dx;
 static int8_t shake_dy;
 
 /*
- * Half a dither level, alternating every frame. Because the Bayer thresholds
- * are even, adding this makes an odd amplitude light one extra cell on every
- * other frame, and the eye averages the two into a level the 4x4 matrix cannot
- * hold on its own. That doubles the usable greys, which is what lets the
- * cartridge passes stay distinguishable from one another.
+ * Where the dither matrix is sampled from. Zero for everything except the
+ * fill, which sets it to the drifting phase and puts it back afterwards —
+ * mechanism must never inherit ink's movement.
  */
-static uint8_t dither_phase;
+static uint8_t dither_ox;
+static uint8_t dither_oy;
+
+/* Advances one cell every INK_DRIFT_FRAMES, and only on drawn frames, so a
+ * resting panel is genuinely still. */
+static uint16_t ink_clock;
+
+/*
+ * Vertical clip, in screen rows. Only the sheet in the machine is ever clipped
+ * — the stops and the globe are the machine itself and are drawn whole.
+ */
+static int16_t clip_lo;
+static int16_t clip_hi = SCREEN_H;
+
+static inline void clip_rows(int lo, int hi) {
+    clip_lo = (int16_t)lo;
+    clip_hi = (int16_t)hi;
+}
+
+static inline void clip_none(void) {
+    clip_lo = 0;
+    clip_hi = SCREEN_H;
+}
 
 /* ---------------------------------------------------------------- pixels -- */
 
@@ -180,10 +295,22 @@ static inline void put_fb(uint8_t *buf, int px, int py, uint8_t amp) {
     if (px < 0 || px >= FB_W || py < 0 || py >= FB_H) {
         return;
     }
-    if ((uint8_t)(bayer4[py & 3][px & 3] * 2 + dither_phase) >= amp) {
+    if ((uint8_t)(bayer4[(py + dither_oy) & 3][(px + dither_ox) & 3] * 2) >= amp) {
         return;
     }
     buf[py * FB_W + px] = draw_ink;
+}
+
+/* Bracket a run of ink drawing. Nested use would be wrong, so it is not. */
+static inline void ink_begin(void) {
+    uint8_t step = (uint8_t)(ink_clock / INK_DRIFT_FRAMES);
+    dither_ox = step & 3;
+    dither_oy = (step >> 1) & 3; /* half the rate on the other axis: diagonal */
+}
+
+static inline void ink_end(void) {
+    dither_ox = 0;
+    dither_oy = 0;
 }
 
 /*
@@ -192,6 +319,12 @@ static inline void put_fb(uint8_t *buf, int px, int py, uint8_t amp) {
  * rather than a transpose, because a transpose would mirror the splash text.
  */
 static inline void screen_plot(uint8_t *buf, int sx, int sy, uint8_t amp) {
+    /* Clipped before the shake, so a screen change wiping through the track
+     * cuts along a fixed line rather than one that jitters with the panel. */
+    if (sy < clip_lo || sy >= clip_hi) {
+        return;
+    }
+
     sx += shake_dx;
     sy += shake_dy;
 
@@ -226,6 +359,32 @@ static void screen_rect(uint8_t *buf, int x, int y, int w, int h, uint8_t amp) {
     for (int j = 0; j < h; j++) {
         screen_hline(buf, x, x + w - 1, y + j, amp);
     }
+}
+
+static int text_width(const char *s) {
+    int n = 0;
+    for (; *s != '\0'; s++) {
+        n++;
+    }
+    return n * NINO_GLYPH_ADVANCE - (n > 0 ? 1 : 0);
+}
+
+static void draw_text(uint8_t *buf, int x, int y, const char *s, uint8_t amp) {
+    for (; *s != '\0'; s++, x += NINO_GLYPH_ADVANCE) {
+        const uint8_t *rows = nino_glyphs[nino_glyph_index(*s)];
+
+        for (int row = 0; row < NINO_GLYPH_H; row++) {
+            for (int col = 0; col < NINO_GLYPH_W; col++) {
+                if (rows[row] & (1 << (NINO_GLYPH_W - 1 - col))) {
+                    screen_plot(buf, x + col, y + row, amp);
+                }
+            }
+        }
+    }
+}
+
+static void draw_text_centred(uint8_t *buf, int y, const char *s, uint8_t amp) {
+    draw_text(buf, (SCREEN_W - text_width(s)) / 2, y, s, amp);
 }
 
 /*
@@ -394,15 +553,10 @@ static const uint8_t *const nino_letters[4] = {glyph_n, glyph_i, glyph_n, glyph_
  * overshoots and settles or accelerates away, because a constant rate is the
  * one thing a mechanism never does.
  */
-#define SPLASH_FEED 8    /* platen seating */
-#define SPLASH_STRIKE 10 /* per letter */
-#define SPLASH_STRIKE_ALL (4 * SPLASH_STRIKE)
+#define SPLASH_FEED 8   /* platen seating */
+#define SPLASH_REVEAL 20 /* the pass that lays the name down */
 #define SPLASH_RETURN 7 /* sheet thrown clear */
-#define SPLASH_FIXED (SPLASH_FEED + SPLASH_STRIKE_ALL + SPLASH_RETURN)
-
-/* The impact of a hammer, along the paper the way a real one lands. */
-#define SPLASH_HIT_FRAMES 3
-#define SPLASH_HIT_MAG 2
+#define SPLASH_FIXED (SPLASH_FEED + SPLASH_REVEAL + SPLASH_RETURN)
 
 /*
  * The platen dropping into position: down hard, past the stop, and back. The
@@ -419,18 +573,6 @@ static const int8_t splash_feed_offset[SPLASH_FEED] = {-13, -9, -6, -3, -1, 2, 3
  */
 static const int8_t splash_eject_offset[SPLASH_RETURN] = {0, -8, -20, -38, -62, -92, -127};
 
-/* A freshly struck letter lands low and rocks up into its cell. */
-static const int8_t splash_letter_drop[4] = {2, 2, 1, 0};
-
-/*
- * Ink setting into paper: a strike starts thin and darkens over a few frames
- * rather than arriving finished. The intermediate steps land on odd
- * amplitudes, so this is only really a gradient with the temporal dither on;
- * without it the letter simply arrives in two steps instead of five.
- */
-#define SPLASH_INK_START 6
-#define SPLASH_INK_STEP 7
-
 /*
  * No two strikes on a real machine ink quite alike. A couple of levels off
  * solid is a scattering of missing pixels — not obviously wrong, just not
@@ -444,10 +586,14 @@ static inline uint16_t splash_elapsed(const struct zmk_widget_nino *widget) {
     return widget->splash_total - widget->splash_frames;
 }
 
-/* True on the frame a letter lands, which is what the hammer blow hangs off. */
-static bool splash_is_strike(uint16_t elapsed) {
-    return elapsed >= SPLASH_FEED && elapsed < SPLASH_FEED + SPLASH_STRIKE_ALL &&
-           ((elapsed - SPLASH_FEED) % SPLASH_STRIKE) == 0;
+/* Rows clipped to a boundary, which is how the reveal pass eats into a glyph. */
+static void screen_rect_clipped(uint8_t *buf, int x, int y, int w, int h, uint8_t amp, int max_y) {
+    for (int j = 0; j < h; j++) {
+        if (y + j >= max_y) {
+            return;
+        }
+        screen_hline(buf, x, x + w - 1, y + j, amp);
+    }
 }
 
 static void draw_splash(uint8_t *buf, const struct zmk_widget_nino *widget) {
@@ -466,28 +612,47 @@ static void draw_splash(uint8_t *buf, const struct zmk_widget_nino *widget) {
         top += splash_eject_offset[SPLASH_RETURN - remaining];
     }
 
-    /* How much is on the paper, and how far through setting the newest is. */
-    int letters;
-    int newest_ink = AMP_SOLID;
-    int newest_drop = 0;
+    /*
+     * The name is laid down by a pass of the carriage, not hammered on letter
+     * by letter — the same movement the track uses, so the boot screen and the
+     * working screen speak the same language. A rule travels down the block; a
+     * light texture follows it; the letters exist only where it has been.
+     *
+     * The span runs from the top rule to just past the bottom one, so the pass
+     * clears the whole sheet rather than stopping on the last letter.
+     */
+    int span = SPLASH_BLOCK + 12;
+    int sweep_top = top - 6;
+    int boundary;
 
     if (elapsed < SPLASH_FEED) {
-        letters = 0;
-    } else if (elapsed < SPLASH_FEED + SPLASH_STRIKE_ALL) {
-        int t = elapsed - SPLASH_FEED;
-        int sub = t % SPLASH_STRIKE;
-
-        letters = (t / SPLASH_STRIKE) + 1;
-        newest_ink = MIN(SPLASH_INK_START + sub * SPLASH_INK_STEP, AMP_SOLID);
-        newest_drop = (sub < (int)ARRAY_SIZE(splash_letter_drop)) ? splash_letter_drop[sub] : 0;
+        boundary = sweep_top; /* paper in, nothing laid down yet */
+    } else if (elapsed < SPLASH_FEED + SPLASH_REVEAL) {
+        int t = (int)elapsed - SPLASH_FEED + 1;
+        boundary = sweep_top + (t * span) / SPLASH_REVEAL;
     } else {
-        letters = 4;
+        boundary = sweep_top + span;
     }
 
-    /* Rules top and bottom, so the name sits on something. Drawn even before
-     * the first strike: the paper is in the machine, it is simply blank. */
+    bool sweeping = (elapsed >= SPLASH_FEED) && (elapsed < SPLASH_FEED + SPLASH_REVEAL);
+
+    /* Top rule always: the paper is in the machine, it is simply blank. */
     screen_hline(buf, 2, SCREEN_W - 3, top - 6, AMP_SOLID);
-    screen_hline(buf, 2, SCREEN_W - 3, top + SPLASH_BLOCK + 5, AMP_SOLID);
+
+    /* The texture the pass leaves behind it, at the lightest of the eight
+     * levels — enough to show the sheet has been written on, not enough to
+     * compete with the letters sitting in it. */
+    for (int y = sweep_top + 1; y < boundary && y < top + SPLASH_BLOCK + 5; y++) {
+        screen_hline(buf, 2, SCREEN_W - 3, y, AMP_LEVEL(1));
+    }
+
+    /* The bottom rule is the stop, and only exists once the pass has reached
+     * it — otherwise the sheet looks finished before it is. */
+    if (!sweeping) {
+        screen_hline(buf, 2, SCREEN_W - 3, top + SPLASH_BLOCK + 5, AMP_SOLID);
+    }
+
+    int letters = sweeping ? 4 : (elapsed < SPLASH_FEED ? 0 : 4);
 
     /*
      * The caret waits at the top of the next empty cell while there is one,
@@ -508,10 +673,8 @@ static void draw_splash(uint8_t *buf, const struct zmk_widget_nino *widget) {
 
     for (int letter = 0; letter < letters && letter < 4; letter++) {
         const uint8_t *rows = nino_letters[letter];
-        bool newest = (letter == letters - 1);
-        int cell_top = top + letter * (SPLASH_CELL + SPLASH_GAP) + (newest ? newest_drop : 0);
-        uint8_t amp = newest ? (uint8_t)MIN(newest_ink, splash_letter_ink[letter])
-                             : splash_letter_ink[letter];
+        int cell_top = top + letter * (SPLASH_CELL + SPLASH_GAP);
+        uint8_t amp = splash_letter_ink[letter];
 
         for (int row = 0; row < 5; row++) {
             for (int col = 0; col < 5; col++) {
@@ -519,10 +682,18 @@ static void draw_splash(uint8_t *buf, const struct zmk_widget_nino *widget) {
                 if (!(rows[row] & (1 << (4 - col)))) {
                     continue;
                 }
-                screen_rect(buf, left + col * SPLASH_SCALE, cell_top + row * SPLASH_SCALE,
-                            SPLASH_SCALE, SPLASH_SCALE, amp);
+                screen_rect_clipped(buf, left + col * SPLASH_SCALE, cell_top + row * SPLASH_SCALE,
+                                    SPLASH_SCALE, SPLASH_SCALE, amp, boundary);
             }
         }
+    }
+
+    /*
+     * The carriage itself, last, so it rides over the letters it is uncovering
+     * rather than being buried by them.
+     */
+    if (sweeping) {
+        screen_hline(buf, 0, SCREEN_W - 1, boundary, AMP_SOLID);
     }
 }
 
@@ -540,7 +711,11 @@ static uint8_t fill_amp(uint8_t layer) {
 }
 
 /* True once further passes would no longer be any denser. */
-static bool fill_saturated(uint8_t layer) { return fill_amp(layer) >= CONFIG_NINO_FILL_AMP_MAX; }
+/*
+ * Passes past the eighth no longer change the texture — fill_amp() clamps — so
+ * nothing here needs to know where the ladder stops. The pip row is what keeps
+ * counting from there.
+ */
 
 /* Where on the track a given character count puts the bar. */
 static int carriage_px(uint16_t column) {
@@ -561,7 +736,9 @@ static int carriage_y(const struct zmk_widget_nino *widget) {
     return TRACK_TOP + widget->carriage_pos + (widget->pressed ? CONFIG_NINO_PRESS_DIP : 0);
 }
 
-static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
+/* The working sheet: what the carriage has laid down, and where it is. The
+ * stops around it belong to the machine and are drawn by draw_chrome. */
+static void draw_sheet_main(uint8_t *buf, const struct zmk_widget_nino *widget) {
     /*
      * The track carries the texture the cartridge has laid down. Dithered
      * rather than solid: on a 1-bit panel a solid block would be as bright as
@@ -585,6 +762,25 @@ static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
     uint8_t behind = (widget->fill_layer > 0) ? fill_amp(widget->fill_layer - 1) : 0;
     uint8_t ahead = fill_amp(widget->fill_layer);
 
+    /*
+     * A transfer takes the track over. The cartridge is already the thing that
+     * says "this much of a fixed capacity is used", which is exactly what a
+     * progress bar says, so nothing new is invented for it — the same bar moves
+     * down the same track, driven by the host instead of by your hands.
+     *
+     * It is unmistakably not typing, though: the whole track fills at the top
+     * of the ladder rather than at the current pass's density, and the ladder
+     * of accumulated passes is not disturbed. The transfer borrows the track
+     * and gives it back.
+     */
+    if (widget->transferring) {
+        filled_to = TRACK_TOP + ((int)widget->transfer_progress * TRACK_LEN) / 255;
+        behind = 0;
+        ahead = fill_amp(NINO_FILL_LEVELS - 1);
+    }
+
+    /* Ink, and only ink, is sampled through the drifting phase. */
+    ink_begin();
     if (behind > 0) {
         for (int y = filled_to; y < track_end; y++) {
             screen_hline(buf, 1, SCREEN_W - 2, y, behind);
@@ -593,17 +789,63 @@ static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
     for (int y = TRACK_TOP; y < filled_to; y++) {
         screen_hline(buf, 1, SCREEN_W - 2, y, ahead);
     }
+    ink_end();
 
     /*
-     * A ruler rather than a rail: a tick every five pixels of track on each
-     * side, a longer one every twenty-five. Position becomes countable instead
-     * of being a bar sliding along a featureless line.
+     * The ruler is now graduated in characters, not pixels: a mark every
+     * NINO_TICK_CHARS. That makes it the same scale the cadence mark counts on,
+     * so passing a graduation is what lights it — the tick is not a separate
+     * event drawn near the ruler, it IS the ruler mark, briefly struck.
+     *
+     * A layer being held drops every other graduation, halving the scale. The
+     * track changes character with nothing added to the screen, which is the
+     * whole reason the old layer bar came off.
      */
-    for (int c = 0; c <= TRACK_LEN; c += RULER_MINOR) {
-        int y = TRACK_TOP + c;
-        int len = (c % RULER_MAJOR == 0) ? 3 : 1;
+    bool layered = (zmk_keymap_highest_layer_active() > 0);
+    int lit_mark = (widget->tick_flash > 0) ? widget->tick_mark : -1;
+
+    for (int n = 0; n * CONFIG_NINO_TICK_CHARS <= CART_CHARS; n++) {
+        if (layered && (n & 1)) {
+            continue;
+        }
+
+        int y = TRACK_TOP + carriage_px((uint16_t)(n * CONFIG_NINO_TICK_CHARS));
+        /* A struck graduation reaches further in; it does not change brightness,
+         * because mechanism is always solid. */
+        int len = (n == lit_mark) ? TICK_DASH_STRUCK : TICK_DASH;
+
         screen_hline(buf, 0, len - 1, y, AMP_SOLID);
         screen_hline(buf, SCREEN_W - len, SCREEN_W - 1, y, AMP_SOLID);
+    }
+
+    /*
+     * Completed passes, one pip each, in rows below the stop. Counted rather
+     * than shaded: density tops out after eight passes, and a countable mark
+     * keeps working long after the texture has stopped telling you anything.
+     */
+    for (int p = 0; p < widget->fill_layer && p < PASS_MAX; p++) {
+        int row = p / PASS_PIPS_PER_ROW;
+        int col = p % PASS_PIPS_PER_ROW;
+        int row_w = PASS_PIPS_PER_ROW * PASS_PIP_STRIDE - (PASS_PIP_STRIDE - PIP_SIZE);
+        int x = ((SCREEN_W - row_w) / 2) + col * PASS_PIP_STRIDE;
+
+        /* Dried ink: the fill's texture at the top of the ladder, and pointedly
+         * NOT sampled through the drift — this is ink that has stopped. At this
+         * density every 2x2 catches two or three cells, so a pip is always
+         * visible however it lands on the matrix, and still reads as textured
+         * rather than machined. */
+        screen_rect(buf, x, track_end + 3 + row * (PIP_SIZE + 1), PIP_SIZE, PIP_SIZE, PIP_AMP);
+    }
+
+    /*
+     * The page being taken back. Drawn over the fill and under the carriage, so
+     * it sweeps through the texture rather than across the top of everything.
+     */
+    if (widget->wrap_sweep > 0) {
+        int t = WRAP_SWEEP_FRAMES - widget->wrap_sweep;
+        int sweep_y = track_end - ((t * TRACK_LEN) / WRAP_SWEEP_FRAMES);
+        screen_hline(buf, 0, SCREEN_W - 1, sweep_y, AMP_SOLID);
+        screen_hline(buf, 2, SCREEN_W - 3, sweep_y + 1, AMP_LEVEL(4));
     }
 
     /*
@@ -622,20 +864,172 @@ static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
         screen_hline(buf, (SCREEN_W / 2) - half, (SCREEN_W / 2) + half, y + (i * dir), AMP_SOLID);
     }
 
-    /*
-     * A space's ripple: a ring off the arrow's tip, widening and fading. Drawn
-     * last so it reads as sitting on top of the track rather than under it.
-     */
-    if (widget->ripple > 0) {
-        int t = RIPPLE_TOTAL - widget->ripple;
-        int amp = AMP_SOLID - (t * RIPPLE_FADE);
-        if (amp > 0) {
-            /* Half a pixel of growth per frame, so the ring widens over the
-             * whole fade rather than racing away from the arrow and leaving
-             * the tail of it hanging in open space. */
-            screen_circle(buf, SCREEN_W / 2, widget->ripple_y, 1 + (t + 1) / 2, (uint8_t)amp);
-        }
+}
+
+/* ----------------------------------------------------------------- destow -- */
+
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+
+/*
+ * Destow is not a different screen. It is a different sheet in the same
+ * cartridge: the stops and the globe stay exactly where they are, and only
+ * what lies between them changes.
+ *
+ * The sheet divides into a gauge band and a list. The gauge is the store, so
+ * it is ink and it drifts. The divider, the caret and the words are mechanism
+ * and draw solid. Labels are cut to three letters not for space — there is
+ * room for five — but so the column has one width, and the eye reads position
+ * rather than length.
+ */
+
+#define SHEET_GAUGE_TOP (TRACK_TOP + 2)
+#define SHEET_GAUGE_H 20
+#define SHEET_DIVIDER (SHEET_GAUGE_TOP + SHEET_GAUGE_H + 3)
+#define SHEET_ROW_TOP (SHEET_DIVIDER + 5)
+#define SHEET_ROW 12
+#define SHEET_TEXT_X 10
+
+static const char *const destow_items[NINO_ITEM_COUNT] = {"SND", "WPE", "EXT"};
+
+/*
+ * Selection is ink, not brightness. The chosen row is a block of the densest
+ * fill with its letters knocked back out of it in the background colour —
+ * unprinted paper inside printed. Unselected rows are bare paper with the
+ * letters printed on them, which is the ordinary way round.
+ *
+ * This is the only place a row's material changes, and it changes completely:
+ * there is no half-lit intermediate for the eye to have to interpret.
+ */
+#define ROW_PAD_X 2
+#define ROW_PAD_Y 2
+
+static void draw_option(uint8_t *buf, int y, const char *label, bool selected) {
+    if (!selected) {
+        draw_text(buf, SHEET_TEXT_X, y, label, AMP_SOLID);
+        return;
     }
+
+    ink_begin();
+    screen_rect(buf, ROW_PAD_X, y - ROW_PAD_Y, SCREEN_W - 2 * ROW_PAD_X,
+                NINO_GLYPH_H + 2 * ROW_PAD_Y, AMP_LEVEL(10));
+    ink_end();
+
+    /* Knocked out: the letters are where the ink is not. */
+    uint8_t ink = draw_ink;
+    draw_ink = (uint8_t)~ink;
+    draw_text(buf, SHEET_TEXT_X, y, label, AMP_SOLID);
+    draw_ink = ink;
+}
+
+/* How full the store is, in the top band of the sheet. Fills downward, the
+ * same direction the carriage lays ink down on the working sheet. */
+static void draw_gauge_band(uint8_t *buf) {
+    size_t capacity = nino_store_capacity();
+    size_t used = capacity ? nino_store_used() : 0;
+    int filled = capacity ? (int)(((uint64_t)used * SHEET_GAUGE_H) / capacity) : 0;
+
+    /* Anything at all shows as one line, so a nearly empty store reads as
+     * holding something rather than as a fault. */
+    if (used > 0 && filled == 0) {
+        filled = 1;
+    }
+
+    ink_begin();
+    for (int i = 0; i < filled; i++) {
+        screen_hline(buf, 1, SCREEN_W - 2, SHEET_GAUGE_TOP + i, AMP_LEVEL(6));
+    }
+    ink_end();
+
+    screen_hline(buf, 2, SCREEN_W - 3, SHEET_DIVIDER, AMP_SOLID);
+}
+
+static void draw_rows(uint8_t *buf, const char *const *labels, int count, int selected) {
+    for (int i = 0; i < count; i++) {
+        draw_option(buf, SHEET_ROW_TOP + i * SHEET_ROW, labels[i], i == selected);
+    }
+}
+
+/* A transfer, in or out: the cartridge itself is the bar. */
+static void draw_sheet_transfer(uint8_t *buf, uint8_t progress, const char *label) {
+    int filled = ((int)progress * TRACK_LEN) / 255;
+
+    ink_begin();
+    for (int i = 0; i < filled; i++) {
+        screen_hline(buf, 1, SCREEN_W - 2, TRACK_TOP + i, AMP_LEVEL(8));
+    }
+    ink_end();
+
+    /* The leading edge is the mechanism's position, so it is solid. */
+    screen_hline(buf, 0, SCREEN_W - 1, TRACK_TOP + filled, AMP_SOLID);
+
+    draw_text(buf, SHEET_TEXT_X, TRACK_TOP + TRACK_LEN - 12, label, AMP_SOLID);
+}
+
+static const char *const confirm_items[2] = {"NO", "YES"};
+
+static void draw_sheet_destow(uint8_t *buf, uint8_t view) {
+    draw_gauge_band(buf);
+
+    switch (view) {
+    case NINO_VIEW_DESTOW_MENU:
+        draw_rows(buf, destow_items, NINO_ITEM_COUNT, nino_destow_selection());
+        break;
+
+    case NINO_VIEW_DESTOW_CONFIRM:
+        draw_rows(buf, confirm_items, 2, nino_destow_selection());
+        break;
+
+    case NINO_VIEW_DESTOW_SENT:
+        draw_text(buf, SHEET_TEXT_X, SHEET_ROW_TOP, "SNT", AMP_SOLID);
+        break;
+
+    default: /* EMPTY */
+        draw_text(buf, SHEET_TEXT_X, SHEET_ROW_TOP, "NIL", AMP_SOLID);
+        break;
+    }
+}
+
+#endif /* CONFIG_NINO_NOTES */
+
+/* ------------------------------------------------------------------ views -- */
+
+/*
+ * The sheet occupies the track and the pip rows under it. Everything below
+ * that is the globe, which is machine and never wipes.
+ */
+#define SHEET_TOP TRACK_TOP
+#define SHEET_BOTTOM (TRACK_TOP + TRACK_LEN + 12)
+
+/*
+ * The reveal travels slower than the slam that precedes it. The slam is the
+ * machine discarding something and wants to feel violent; the reveal is the
+ * machine presenting something and has to be readable as it arrives.
+ */
+#define REVEAL_SPEED 7
+
+static uint8_t current_view(void) {
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+    if (nino_store_busy()) {
+        return NINO_VIEW_XFER_IN;
+    }
+    if (nino_store_reading()) {
+        return NINO_VIEW_XFER_OUT;
+    }
+
+    switch (nino_destow_screen()) {
+    case NINO_DESTOW_MENU:
+        return NINO_VIEW_DESTOW_MENU;
+    case NINO_DESTOW_CONFIRM:
+        return NINO_VIEW_DESTOW_CONFIRM;
+    case NINO_DESTOW_SENT:
+        return NINO_VIEW_DESTOW_SENT;
+    case NINO_DESTOW_EMPTY:
+        return NINO_VIEW_DESTOW_EMPTY;
+    default:
+        break;
+    }
+#endif
+    return NINO_VIEW_MAIN;
 }
 
 /* ------------------------------------------------------------------ globe -- */
@@ -643,6 +1037,35 @@ static void draw_carriage(uint8_t *buf, const struct zmk_widget_nino *widget) {
 /* Latitudes and longitudes of the wire grid, as sine-table indices. */
 static const int8_t globe_latitudes[3] = {-7, 0, 7};
 static const int8_t globe_meridians[4] = {0, 8, 16, 24};
+
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+/*
+ * How full the note store is, as a ring of pips around the globe. This is the
+ * one piece of state on the keyboard worth acting on — it decides whether a
+ * week's writing will fit — and until now it appeared nowhere at all, while the
+ * globe sat there being decorative. A gauge is part of the machine, so the lit
+ * pips are solid; the unlit ones are the scale they are read against, and stay
+ * at the faintest level on the ladder.
+ */
+static void draw_store_gauge(uint8_t *buf, int cy) {
+    size_t capacity = nino_store_capacity();
+    if (capacity == 0) {
+        return;
+    }
+
+    int radius = CONFIG_NINO_BALL_RADIUS + 3;
+    int lit = (int)(((uint64_t)nino_store_used() * CONFIG_NINO_GAUGE_PIPS) / capacity);
+
+    for (int i = 0; i < CONFIG_NINO_GAUGE_PIPS; i++) {
+        /* Anticlockwise from the top, so filling reads the way a dial does. */
+        int angle = (i * 64) / CONFIG_NINO_GAUGE_PIPS;
+        int px = (radius * fx_sin(angle)) >> 12;
+        int py = -((radius * fx_cos(angle)) >> 12);
+
+        screen_plot(buf, BALL_CX + px, cy + py, (i < lit) ? AMP_SOLID : AMP_LEVEL(1));
+    }
+}
+#endif
 
 static void globe_point(int x, int y, int z, int sin_y, int cos_y, int sin_p, int cos_p, int *ox,
                         int *oy, int *oz) {
@@ -752,6 +1175,54 @@ static void draw_globe(uint8_t *buf, const struct zmk_widget_nino *widget) {
     }
 
     draw_ink = ink;
+
+    /*
+     * The distance mark, outside the Caps Lock inversion for the same reason
+     * the gauge is: it is the machine speaking, not part of what the globe is
+     * showing.
+     */
+    if (widget->orb_ring > 0) {
+        int t = ORB_RING_FRAMES - widget->orb_ring;
+        screen_circle(buf, BALL_CX, cy, r + 2 + (t * ORB_RING_STEP), AMP_SOLID);
+    }
+
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+    /* Outside the Caps Lock inversion: the gauge is an instrument, and an
+     * instrument that inverts with a shift key is one you cannot read. */
+    draw_store_gauge(buf, cy);
+#endif
+}
+
+/* ------------------------------------------------------------- composition -- */
+
+static void draw_sheet(uint8_t *buf, const struct zmk_widget_nino *widget, uint8_t view) {
+    if (view == NINO_VIEW_MAIN) {
+        draw_sheet_main(buf, widget);
+        return;
+    }
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+    if (view == NINO_VIEW_XFER_IN) {
+        draw_sheet_transfer(buf, widget->transfer_progress, "IN");
+        return;
+    }
+    if (view == NINO_VIEW_XFER_OUT) {
+        draw_sheet_transfer(buf, nino_store_read_progress(), "OUT");
+        return;
+    }
+    draw_sheet_destow(buf, view);
+#endif
+}
+
+/*
+ * The machine: the cartridge's two stops and the globe. Drawn after the sheet
+ * and never clipped, so a wipe passes through the paper without the frame
+ * around it moving — which is what makes a screen change read as the sheet
+ * being swapped rather than the whole panel being replaced.
+ */
+static void draw_chrome(uint8_t *buf, const struct zmk_widget_nino *widget) {
+    screen_hline(buf, 0, SCREEN_W - 1, TRACK_TOP - 1, AMP_SOLID);
+    screen_hline(buf, 0, SCREEN_W - 1, TRACK_TOP + TRACK_LEN, AMP_SOLID);
+    draw_globe(buf, widget);
 }
 
 /* ------------------------------------------------------------------- test -- */
@@ -823,31 +1294,34 @@ static void nino_advance(struct zmk_widget_nino *widget) {
     if (widget->column >= CART_CHARS) {
         widget->column = 0;
         widget->carriage_pos = 0;
-        if (!fill_saturated(widget->fill_layer)) {
+        /* Counted past the point the fill stops thickening — the pips carry it
+         * from there, so the counter is no longer clamped to the ladder. */
+        if (widget->fill_layer < PASS_MAX) {
             widget->fill_layer++;
         }
+        widget->wrap_sweep = WRAP_SWEEP_FRAMES;
         return;
     }
 
     widget->carriage_pos = (int16_t)carriage_px(widget->column);
 
-    /* A nudge each time the carriage passes one of the long ruler ticks. */
-    if ((widget->carriage_pos / RULER_MAJOR) != (prev_px / RULER_MAJOR)) {
-        nino_shake(widget, TICK_SHAKE_FRAMES, TICK_SHAKE_MAG, false);
+    /* Crossing a graduation strikes it. Rare enough to punctuate rather than
+     * accompany, which is what the old per-space ring never managed. */
+    if ((widget->column % CONFIG_NINO_TICK_CHARS) == 0) {
+        widget->tick_flash = TICK_FLASH_FRAMES;
+        widget->tick_mark = (int8_t)(widget->column / CONFIG_NINO_TICK_CHARS);
     }
-}
 
-/*
- * A space advances like any other character and then rings a ripple off the
- * arrow. Restarted rather than queued: hold the space bar down and it reads as
- * one continuous pulse, which is what a repeat should look like.
- */
-static void nino_space(struct zmk_widget_nino *widget) {
-    nino_advance(widget);
-
-    widget->ripple = RIPPLE_TOTAL;
-    /* Off the tip, wherever the heat has put it this frame. */
-    widget->ripple_y = (int16_t)(carriage_y(widget) + carriage_point(widget));
+    /*
+     * The ruler ticks used to jolt the screen as the carriage crossed them.
+     * They no longer do. At a tick every twenty-five pixels of a seventy-two
+     * pixel track, ordinary typing was setting the whole panel shivering every
+     * second or so, and a machine that trembles continuously does not read as
+     * responsive — it reads as loose. The ticks are visible; they do not also
+     * need to be felt. Impact is reserved for the return, which is the one
+     * moment that genuinely is one.
+     */
+    ARG_UNUSED(prev_px);
 }
 
 static void nino_backspace(struct zmk_widget_nino *widget) {
@@ -863,10 +1337,13 @@ static void nino_backspace(struct zmk_widget_nino *widget) {
     widget->rebounding = false;
     widget->carriage_pos = (int16_t)carriage_px(widget->column);
 
-    /* Erasing is not typing in reverse: the chevron turns to face the way the
-     * carriage is being dragged, and the jolt goes with it. */
+    /*
+     * Erasing is not typing in reverse: the chevron turns to face the way the
+     * carriage is being dragged. The flip alone carries it — a shake here as
+     * well meant holding backspace shook the panel continuously, which was the
+     * worst of the lot.
+     */
     widget->erase_frames = ERASE_FRAMES;
-    nino_shake(widget, TICK_SHAKE_FRAMES, TICK_SHAKE_MAG, false);
 }
 
 /*
@@ -880,7 +1357,7 @@ static void nino_return(struct zmk_widget_nino *widget) {
     widget->fill_layer = 0;
     widget->slamming = true;
     widget->rebounding = false;
-    widget->ripple = 0;
+    widget->tick_flash = 0;
     widget->erase_frames = 0;
 
     /* The slam owns the whole screen: a full-panel invert, a hard lateral
@@ -902,38 +1379,80 @@ static void nino_render(lv_timer_t *timer) {
         case NINO_INPUT_CHAR:
             nino_advance(widget);
             break;
-        case NINO_INPUT_SPACE:
-            nino_space(widget);
-            break;
         case NINO_INPUT_BACKSPACE:
             nino_backspace(widget);
             break;
         case NINO_INPUT_RETURN:
             nino_return(widget);
             break;
+        /*
+         * The globe answers the knob on every screen, always. It is the one
+         * thing the panel never takes away, so it is what tells you the knob
+         * is connected at all — on a menu that would otherwise only move a
+         * caret, and on a screen with nothing to move.
+         */
         case NINO_INPUT_KNOB_TURN:
             if (zmk_keymap_highest_layer_active() > 0) {
                 widget->pitch_target += in.value * CONFIG_NINO_BALL_STEP;
             } else {
                 widget->yaw_target += in.value * CONFIG_NINO_BALL_STEP;
             }
+
+            /*
+             * Counted in detents, not in direction: this marks how far the knob
+             * has been worked, so turning back and forth still gets there. The
+             * globe otherwise spins without ever arriving anywhere.
+             */
+            if (++widget->knob_count >= CONFIG_NINO_KNOB_MARK) {
+                widget->knob_count = 0;
+                widget->orb_ring = ORB_RING_FRAMES;
+                nino_shake(widget, ORB_TICK_FRAMES, ORB_TICK_MAG, false);
+            }
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+            if (nino_destow_active()) {
+                nino_destow_turn(in.value);
+                widget->dirty = true;
+            }
+#endif
             break;
+
         case NINO_INPUT_KNOB_CLICK:
+            nino_globe_strike(widget);
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+            if (nino_destow_active()) {
+                /* No slam: the carriage is not on this sheet, and throwing it
+                 * home would be the machine answering the wrong question. */
+                nino_destow_click();
+                widget->dirty = true;
+                break;
+            }
+#endif
             /* The keymap also binds this position to Return, so the queue
              * usually carries both events. Slamming twice in one frame lands
              * on the same state, and doing it here keeps the knob working if
              * that binding ever changes. */
-            nino_globe_strike(widget);
             nino_return(widget);
             break;
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+        case NINO_INPUT_DESTOW:
+            nino_destow_toggle();
+            widget->dirty = true;
+            break;
+#endif
         default:
             break;
         }
     }
 
-    /* Any input dismisses the splash early. */
-    if (had_input && widget->splash_frames > 0) {
-        widget->splash_frames = 0;
+    /*
+     * Input dismisses the splash, but by throwing the sheet out rather than by
+     * cutting to black — the eject is the whole point of the gesture, and a
+     * keypress that simply erased the screen would waste it. Skipping straight
+     * to the last SPLASH_RETURN frames plays that wipe and nothing else, so an
+     * impatient keypress still gets the machine finishing its movement.
+     */
+    if (had_input && widget->splash_frames > SPLASH_RETURN) {
+        widget->splash_frames = SPLASH_RETURN;
         widget->dirty = true;
     }
 
@@ -942,6 +1461,25 @@ static void nino_render(lv_timer_t *timer) {
         widget->caps = caps;
         widget->dirty = true;
     }
+
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+    /*
+     * Polled rather than pushed. The link thread has no business knowing a
+     * display exists, and a transfer moves far faster than the frame rate
+     * anyway — sampling once a frame is exactly the resolution the panel can
+     * show. The transition either way is what forces a redraw.
+     */
+    {
+        bool busy = nino_store_busy();
+        uint8_t progress = busy ? nino_store_progress() : 0;
+
+        if (busy != widget->transferring || progress != widget->transfer_progress) {
+            widget->transferring = busy;
+            widget->transfer_progress = progress;
+            widget->dirty = true;
+        }
+    }
+#endif
 
     /* A level rather than an event, like Caps Lock: what matters is whether a
      * key is down right now, not that one was struck. */
@@ -970,28 +1508,19 @@ static void nino_render(lv_timer_t *timer) {
     }
 
     bool globe_moving = (widget->yaw != widget->yaw_target) ||
-                        (widget->pitch != widget->pitch_target) || (widget->globe_flash > 0) ||
+                        (widget->pitch != widget->pitch_target) || (widget->globe_flash > 0) || (widget->orb_ring > 0) ||
                         (widget->ball_recoil != 0);
     bool busy = had_input || widget->dirty || widget->test_pattern || globe_moving || idling ||
                 widget->slamming || widget->rebounding || widget->splash_frames > 0 ||
-                widget->shake_frames > 0 || widget->strike_timer > 0 || widget->ripple > 0 ||
-                widget->erase_frames > 0 || widget->heat > 0;
+                widget->shake_frames > 0 || widget->strike_timer > 0 || widget->tick_flash > 0 ||
+                widget->erase_frames > 0 || widget->heat > 0 || widget->wrap_sweep > 0 ||
+                widget->transferring || widget->shift_phase != NINO_SHIFT_NONE ||
+                current_view() != widget->view;
 
     if (!busy) {
         /* Nothing moving — leave the panel alone rather than resending it. */
         return;
     }
-
-    /*
-     * Half-level dither phase, flipped once per drawn frame — so it stops
-     * dead whenever the panel goes quiet, and a resting screen is genuinely
-     * still rather than shimmering at half the frame rate. It also means a
-     * still frame lands on whichever side of a half-level it stopped on,
-     * which is a thirty-second of a level either way and invisible.
-     */
-#if IS_ENABLED(CONFIG_NINO_TEMPORAL_DITHER)
-    dither_phase ^= 1;
-#endif
 
     /*
      * Caps Lock inverts the whole panel. NINO_INVERT flips the convention if
@@ -1055,15 +1584,6 @@ static void nino_render(lv_timer_t *timer) {
     }
 
     if (widget->splash_frames > 0) {
-        /*
-         * Both of these land a frame late: the shake and the whole-screen
-         * invert are consumed above, before the splash is drawn. That is the
-         * right way round anyway — the letter appears, and the machine jolts
-         * underneath it, rather than the two arriving together.
-         */
-        if (splash_is_strike(splash_elapsed(widget))) {
-            nino_shake(widget, SPLASH_HIT_FRAMES, SPLASH_HIT_MAG, false);
-        }
 
         /*
          * The hand-over is the carriage return itself, not a cut to black:
@@ -1110,26 +1630,105 @@ static void nino_render(lv_timer_t *timer) {
         }
     }
 
-    draw_carriage(buf, widget);
+    /*
+     * The sheet, then the machine around it. A view change wipes one rule down
+     * the cartridge, outgoing sheet below it and incoming above — the stops
+     * and the globe never move, so a screen change reads as paper being
+     * swapped rather than the panel being replaced.
+     */
+    uint8_t target = current_view();
+    if (target != widget->view) {
+        widget->view_prev = widget->view;
+        widget->view = target;
+
+        /* Start the bar wherever the outgoing sheet had it, so the throw
+         * begins from a real position rather than from the bottom of the
+         * track every time. */
+        widget->shift_phase = NINO_SHIFT_SLAM;
+        widget->shift_pos = (widget->view_prev == NINO_VIEW_MAIN)
+                                ? CLAMP(widget->carriage_pos, 0, TRACK_LEN)
+                                : TRACK_LEN;
+
+        /* The full gesture, because this IS the gesture: the panel throws, the
+         * globe takes the impact, and the whole thing flashes. */
+        widget->strike_timer = CONFIG_NINO_SLAM_FLASH_FRAMES;
+        widget->ball_recoil = CONFIG_NINO_BALL_RECOIL;
+        nino_shake(widget, CONFIG_NINO_SHAKE_FRAMES, CONFIG_NINO_SHAKE_MAG, true);
+    }
+
+    bool was_shifting = (widget->shift_phase != NINO_SHIFT_NONE);
+
+    if (widget->shift_phase == NINO_SHIFT_SLAM) {
+        /*
+         * The outgoing sheet withdraws behind the bar: everything above it has
+         * already been taken, so the cartridge empties from the top down as
+         * the bar climbs.
+         */
+        clip_rows(SHEET_TOP + widget->shift_pos, SHEET_BOTTOM);
+        draw_sheet(buf, widget, widget->view_prev);
+        clip_none();
+
+        screen_hline(buf, 0, SCREEN_W - 1, SHEET_TOP + widget->shift_pos, AMP_SOLID);
+
+        widget->shift_pos -= CONFIG_NINO_SLAM_SPEED;
+        if (widget->shift_pos <= 0) {
+            widget->shift_pos = 0;
+            widget->shift_phase = NINO_SHIFT_REVEAL;
+        }
+    } else if (widget->shift_phase == NINO_SHIFT_REVEAL) {
+        /* And the incoming one is uncovered as the bar travels back down. */
+        clip_rows(SHEET_TOP, SHEET_TOP + widget->shift_pos);
+        draw_sheet(buf, widget, widget->view);
+        clip_none();
+
+        screen_hline(buf, 0, SCREEN_W - 1, SHEET_TOP + widget->shift_pos, AMP_SOLID);
+
+        widget->shift_pos += REVEAL_SPEED;
+        if (widget->shift_pos >= SHEET_BOTTOM - SHEET_TOP) {
+            widget->shift_pos = 0;
+            widget->shift_phase = NINO_SHIFT_NONE;
+        }
+    } else {
+        draw_sheet(buf, widget, widget->view);
+    }
 
     /* Drawn before the decrement, so the flash gets its full two solid frames. */
-    draw_globe(buf, widget);
+    draw_chrome(buf, widget);
 
     bool was_flashing = (widget->globe_flash > 0);
     if (was_flashing) {
         widget->globe_flash--;
     }
 
-    /* Same latch as the effects above: the ripple's last frame has to be drawn
+    bool was_ringing = (widget->orb_ring > 0);
+    if (was_ringing) {
+        widget->orb_ring--;
+    }
+
+    /* Same latch as the effects above: the tick's last frame has to be drawn
      * before the counter reaching zero is allowed to let the panel go idle. */
-    bool was_rippling = (widget->ripple > 0);
-    if (was_rippling) {
-        widget->ripple--;
+    bool was_ticking = (widget->tick_flash > 0);
+    if (was_ticking) {
+        widget->tick_flash--;
     }
 
     bool was_erasing = (widget->erase_frames > 0);
     if (was_erasing) {
         widget->erase_frames--;
+    }
+
+    bool was_wrapping = (widget->wrap_sweep > 0);
+    if (was_wrapping) {
+        widget->wrap_sweep--;
+    }
+
+    /*
+     * Ink creeps only on frames that are actually drawn, so a resting panel
+     * stops rather than drifting in the dark and jumping when it wakes.
+     */
+    ink_clock++;
+    if (ink_clock >= INK_DRIFT_FRAMES * 4) {
+        ink_clock = 0;
     }
 
     /* Proportional drain, so the chevron relaxes when you stop. */
@@ -1154,17 +1753,21 @@ static void nino_render(lv_timer_t *timer) {
                    (widget->pitch != widget->pitch_target) || (widget->globe_flash > 0);
 
     /* One more frame is owed once everything settles, to draw the resting state. */
-    widget->dirty = globe_moving || widget->slamming || widget->rebounding || was_striking ||
-                    was_shaking || was_flashing || was_recoiling || was_rippling || was_erasing ||
+    widget->dirty = was_shifting || was_ringing || current_view() != widget->view || globe_moving ||
+                    widget->slamming || widget->rebounding || was_striking ||
+                    was_shaking || was_flashing || was_recoiling || was_ticking || was_wrapping ||
+                    was_erasing ||
                     was_hot;
 }
 
 /* -------------------------------------------------------------- listeners -- */
 
-/* Space is handled separately, since it gets a ripple of its own. */
 static bool is_printable(uint32_t keycode) {
     if (keycode >= 0x04 && keycode <= 0x27) {
         return true; /* a-z, 1-0 */
+    }
+    if (keycode == KC_SPACE) {
+        return true; /* just another character; it no longer has an effect of its own */
     }
     if (keycode >= 0x2D && keycode <= 0x38) {
         return true; /* punctuation */
@@ -1180,14 +1783,24 @@ static void nino_post(uint8_t kind, int8_t value) {
 
 static int nino_keycode_listener(const zmk_event_t *eh) {
     const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
-    if (ev == NULL || !ev->state || ev->usage_page != HID_USAGE_KEY) {
+    if (ev == NULL || ev->usage_page != HID_USAGE_KEY) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    /* Chord state is a level, so it tracks both edges — everything below this
+     * point only cares about presses. */
+    if (ev->keycode == KC_SPACE) {
+        atomic_set(&space_held, ev->state ? 1 : 0);
+    } else if (ev->keycode == KC_LSHIFT || ev->keycode == KC_RSHIFT) {
+        atomic_set(&shift_held, ev->state ? 1 : 0);
+    }
+
+    if (!ev->state) {
         return ZMK_EV_EVENT_BUBBLE;
     }
 
     if (ev->keycode == KC_ENTER) {
         nino_post(NINO_INPUT_RETURN, 0);
-    } else if (ev->keycode == KC_SPACE) {
-        nino_post(NINO_INPUT_SPACE, 0);
     } else if (ev->keycode == KC_BACKSPACE) {
         nino_post(NINO_INPUT_BACKSPACE, 0);
     } else if (is_printable(ev->keycode)) {
@@ -1224,6 +1837,22 @@ static int nino_position_listener(const zmk_event_t *eh) {
 
     /* The encoder's push-switch is an ordinary matrix key. */
     if (ev->state && ev->position == CONFIG_NINO_KNOB_POSITION) {
+#if IS_ENABLED(CONFIG_NINO_NOTES)
+        /*
+         * Space and Shift held turns the click into the destow gesture instead
+         * of a carriage return. Consumed rather than bubbled, so the Return the
+         * keymap has on this position never reaches the host — a mode change
+         * should not also type into whatever is focused.
+         *
+         * This depends on running before ZMK's own keymap listener. Listener
+         * order is link order, so if a stray newline ever appears when opening
+         * destow, that is what happened.
+         */
+        if (atomic_get(&space_held) && atomic_get(&shift_held)) {
+            nino_post(NINO_INPUT_DESTOW, 0);
+            return ZMK_EV_EVENT_HANDLED;
+        }
+#endif
         nino_post(NINO_INPUT_KNOB_CLICK, 0);
     }
 
@@ -1301,8 +1930,20 @@ int zmk_widget_nino_init(struct zmk_widget_nino *widget, lv_obj_t *parent) {
     widget->heat = 0;
     widget->pressed = false;
     widget->idle_frames = 0;
-    widget->ripple = 0;
-    widget->ripple_y = 0;
+    widget->tick_flash = 0;
+    widget->tick_mark = -1;
+    widget->transferring = false;
+    widget->transfer_progress = 0;
+
+    /* Starts settled on the working sheet, so the first frame after the splash
+     * is not a wipe from a view that was never on screen. */
+    widget->knob_count = 0;
+    widget->orb_ring = 0;
+
+    widget->view = NINO_VIEW_MAIN;
+    widget->view_prev = NINO_VIEW_MAIN;
+    widget->shift_phase = NINO_SHIFT_NONE;
+    widget->shift_pos = 0;
     widget->strike_timer = 0;
     widget->globe_flash = 0;
     widget->ball_recoil = 0;

@@ -22,14 +22,42 @@
 #define NINO_FB_W DT_PROP(NINO_DISPLAY_NODE, width)
 #define NINO_FB_H DT_PROP(NINO_DISPLAY_NODE, height)
 
+/*
+ * Every screen but the boot splash is the same machine: a cartridge at the top
+ * and the globe at the bottom, both always present. Only the sheet inside the
+ * cartridge changes, and a view is which sheet that is. Changing one wipes
+ * through the track and leaves the machine around it alone.
+ */
+enum nino_view {
+    NINO_VIEW_MAIN = 0,
+    NINO_VIEW_DESTOW_MENU,
+    NINO_VIEW_DESTOW_CONFIRM,
+    NINO_VIEW_DESTOW_SENT,
+    NINO_VIEW_DESTOW_EMPTY,
+    NINO_VIEW_XFER_IN,  /* the host is filling the store */
+    NINO_VIEW_XFER_OUT, /* the host is emptying it */
+};
+
+/*
+ * A sheet change is a carriage return. The bar throws itself home, which empties
+ * the cartridge, and then travels back down uncovering the new sheet as it goes.
+ * The knob click is the selector everywhere, so the machine's answer to being
+ * clicked is the same gesture everywhere too.
+ */
+enum nino_shift_phase {
+    NINO_SHIFT_NONE = 0,
+    NINO_SHIFT_SLAM,   /* bar flying home, old sheet withdrawing behind it */
+    NINO_SHIFT_REVEAL, /* bar descending, new sheet appearing above it */
+};
+
 /* What arrived from the input threads, queued for the display thread. */
 enum nino_input_kind {
     NINO_INPUT_CHAR = 0,
-    NINO_INPUT_SPACE, /* advances like a character, and ripples off the arrow */
     NINO_INPUT_BACKSPACE,
     NINO_INPUT_RETURN,
     NINO_INPUT_KNOB_TURN, /* value carries +1 / -1 */
     NINO_INPUT_KNOB_CLICK,
+    NINO_INPUT_DESTOW, /* enter or leave the note-reading screen */
 };
 
 struct zmk_widget_nino {
@@ -91,12 +119,23 @@ struct zmk_widget_nino {
     uint16_t idle_frames;
 
     /*
-     * A space rings a tiny ring off the carriage's arrow. Anchored at the y it
-     * was struck at rather than following the arrow, so a slam mid-ripple
-     * leaves it behind instead of dragging it up the track.
+     * Passing a ruler graduation strikes it: that mark reaches further into the
+     * track for a few frames. tick_mark is which graduation, by index, so the
+     * emphasis stays on the mark itself even as the carriage moves past it.
      */
-    uint8_t ripple;
-    int16_t ripple_y;
+    uint8_t tick_flash;
+    int8_t tick_mark;
+
+    /* Counts down while the cartridge-full rule sweeps back up the track. */
+    uint8_t wrap_sweep;
+
+    /*
+     * A note transfer running on the host link. While this is set the track is
+     * a progress bar rather than a cartridge; the accumulated passes are left
+     * untouched underneath and come back when it finishes.
+     */
+    bool transferring;
+    uint8_t transfer_progress; /* 0..255 */
 
     /*
      * Globe orientation, in sixteenths of a sine-table step (1024 to the turn).
@@ -123,6 +162,24 @@ struct zmk_widget_nino {
 
     /* The globe kicks upward when the carriage slams, then settles. */
     int8_t ball_recoil;
+
+    /*
+     * Detents since the last mark. Every so many the globe rings once and the
+     * panel ticks — a sense of distance turned, which a freely spinning ball
+     * cannot give on its own.
+     */
+    uint8_t knob_count;
+    uint8_t orb_ring;
+
+    /*
+     * Which sheet is in the machine, which one it was, and where the bar has
+     * got to between them. Both sheets are kept because each is drawn on its
+     * own side of the travelling bar.
+     */
+    uint8_t view;
+    uint8_t view_prev;
+    uint8_t shift_phase;
+    int16_t shift_pos; /* the bar, in pixels down the track */
 
     bool caps;
     bool dirty;

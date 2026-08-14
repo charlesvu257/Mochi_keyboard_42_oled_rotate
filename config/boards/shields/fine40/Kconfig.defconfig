@@ -74,32 +74,20 @@ config NINO_FRAME_MS
 	  Change this and the shake, slam, ripple and flash lengths below all
 	  need rescaling to match, or the whole screen simply gets twitchier.
 
-config NINO_TEMPORAL_DITHER
-	bool "Alternate the dither half a level each frame"
-	default y
-	help
-	  The 4x4 Bayer matrix can only hold 17 densities. Nudging the threshold
-	  by half a level on alternate frames doubles that, which is what keeps
-	  successive cartridge passes distinguishable from one another.
-
-	  The cost is that cells sitting exactly on a half-level toggle at half
-	  the frame rate. That is a small fraction of the pixels and should read
-	  as texture rather than flicker, but it is display-dependent — turn
-	  this off if it shimmers on the glass.
-
 # --- Boot splash ---
 
 config NINO_SPLASH_MS
 	int "How long the NINO splash stays up, in milliseconds"
 	default 2500
 	help
-	  The platen seating, the four hammer strikes and the carriage return
-	  that hands over to the real screen are fixed costs of about 1.5s at
-	  the default frame rate; whatever is left over is hold time under a
-	  blinking caret. Setting this below the fixed cost truncates the hold
-	  rather than speeding the mechanism up.
+	  The platen seating, the pass that lays the name down and the carriage
+	  return that hands over to the real screen are fixed costs of about
+	  1.4s at the default frame rate; whatever is left over is hold time
+	  under a blinking caret. Setting this below the fixed cost truncates
+	  the hold rather than speeding the mechanism up.
 
-	  Any keypress or knob movement dismisses it early.
+	  Any keypress or knob movement skips the hold and throws the sheet
+	  out, so an impatient dismissal still plays the wipe.
 
 # --- Carriage ---
 
@@ -119,34 +107,64 @@ config NINO_CARTRIDGE_CHARS
 	  by itself and starts a fresh pass in a heavier texture. It does not
 	  slam — only Return or the encoder click does that.
 
+config NINO_TICK_CHARS
+	int "Characters between cadence marks"
+	default 20
+	range 1 255
+	help
+	  Two short dashes appear in the margins beside the carriage every this
+	  many characters, for a few frames.
+
+	  This replaced a ring fired on every space. A space is several keys a
+	  second, so anything hung off it accompanies typing rather than
+	  punctuating it — the mark has to be rare to mean anything.
+
+config NINO_GAUGE_PIPS
+	int "Pips in the note-store gauge around the globe"
+	default 16
+	range 4 32
+	help
+	  A ring around the globe showing how full the note store is. Lit pips
+	  are solid, unlit ones sit at the faintest level as the scale they are
+	  read against.
+
+	  Only drawn when NINO_NOTES is enabled — without a store there is
+	  nothing to gauge.
+
 config NINO_FILL_AMP_BASE
 	int "Density of the first pass's fill, 0-32"
-	default 4
+	default 2
 	range 0 32
 	help
-	  Dither amplitude, where 32 is solid. The first pass should be thin
-	  enough to read as a faint texture rather than as written text. Odd
-	  values land between two Bayer levels and need NINO_TEMPORAL_DITHER to
-	  render as anything distinct.
+	  Dither amplitude, where 32 is solid and the 4x4 matrix lights amp/2 of
+	  every 16 cells. Keep this and the step even: odd values land between
+	  two Bayer thresholds and render identically to the even one below,
+	  so an odd ladder silently gives you half as many distinct passes.
+
+	  The default of 2 is one cell in sixteen — a faint tooth on the paper
+	  rather than anything that reads as written text.
 
 config NINO_FILL_AMP_STEP
 	int "How much denser each further pass draws"
-	default 5
+	default 2
 	range 0 32
 	help
-	  Added to the base for every completed cartridge, so successive passes
-	  lay down a visibly thicker texture over the last one. An odd step
-	  makes every other pass land on a half-level, which is the finest
-	  gradation the panel can express.
+	  Added to the base for every completed cartridge. With base and step
+	  both at 2, the eight passes light one through eight cells of every
+	  sixteen — an even ladder from thin to thick, each rung a fixed
+	  pattern that does not move between frames.
 
 config NINO_FILL_AMP_MAX
 	int "Ceiling on the fill density, 0-32"
-	default 24
+	default 20
 	range 0 32
 	help
-	  Passes stop getting denser here. Kept below 32 so the fill never
-	  becomes as bright as the carriage bar itself and the two keep reading
-	  as separate things.
+	  Passes stop getting denser here. With a base and step of 2 that gives
+	  ten levels, one through ten cells of every sixteen.
+
+	  Ten is about the ceiling worth having: the solid bar is sixteen, and
+	  past ten the fill is close enough to it that the two stop reading as
+	  different materials.
 
 config NINO_PRESS_DIP
 	int "Pixels the carriage sinks while a key is held"
@@ -205,6 +223,19 @@ config NINO_BALL_RADIUS
 	help
 	  Capped by the panel's short axis: at 12 the globe spans 25 of the 32
 	  available pixels.
+
+config NINO_KNOB_MARK
+	int "Detents between distance marks on the knob"
+	default 10
+	range 1 255
+	help
+	  Every this many, the globe rings once and the panel ticks a pixel.
+	  Counted in detents rather than in direction, so working the knob back
+	  and forth still arrives at a mark — it measures how far the knob has
+	  been turned, not where it ended up.
+
+	  A freely spinning ball never arrives anywhere. This is what gives it
+	  somewhere to arrive.
 
 config NINO_BALL_STEP
 	int "Rotation per detent, in sixteenths of a sine-table step"
@@ -283,6 +314,36 @@ config NINO_NOTES
 	  holds — it counts bytes, checks a CRC, and hands them back.
 
 if NINO_NOTES
+
+config NINO_DESTOW_COMMAND
+	string "Command typed at the host to fetch the notes"
+	default "destow"
+	help
+	  Typed into whatever has focus, followed by Return, when SEND is
+	  chosen. Point it at destow.py however your host reaches it — a shim on
+	  PATH, "python destow.py", or a full path.
+
+	  Focus a terminal before choosing SEND. The keyboard cannot tell what
+	  it is typing into.
+
+config NINO_DESTOW_KEY_MS
+	int "Milliseconds between keystroke edges"
+	default 4
+	help
+	  Each edge is followed by this, so an unshifted character costs twice
+	  it and a shifted one four times. A command line is over in well under
+	  a second either way; raise it only if the host drops characters.
+
+config NINO_DESTOW_STACK_SIZE
+	int "Stack for the type-out thread"
+	default 1536
+
+config NINO_DESTOW_PRIORITY
+	int "Priority of the type-out thread"
+	default 8
+	help
+	  Below the host link, which is itself below key scanning. Typing out a
+	  store takes minutes and must never be able to delay a keystroke.
 
 config NINO_LINK_STACK_SIZE
 	int "Stack for the host link thread"

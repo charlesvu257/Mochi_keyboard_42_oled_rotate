@@ -4,7 +4,7 @@
  * A line-based ASCII protocol on its own CDC ACM port. The host talks, the
  * keyboard answers, one line each:
  *
- *   HELLO                          -> NINO 1 <capacity> <used>
+ *   HELLO                          -> NINO 1 <capacity> <used> <crc32hex>
  *   ERASE                          -> OK
  *   BEGIN <total> <crc32hex>       -> OK | FULL | ERR
  *   DATA <base32>                  -> OK | BAD
@@ -176,9 +176,12 @@ static void link_isr(const struct device *dev, void *user_data) {
 /* ---------------------------------------------------------------- commands -- */
 
 static void cmd_hello(void) {
+    /* The CRC is part of the greeting because the reader needs it before it
+     * has anything to check against, and there is no sense in a second
+     * round trip for four bytes. */
     char reply[64];
-    snprintf(reply, sizeof(reply), "NINO 1 %u %u", (unsigned)nino_store_capacity(),
-             (unsigned)nino_store_used());
+    snprintf(reply, sizeof(reply), "NINO 1 %u %u %08x", (unsigned)nino_store_capacity(),
+             (unsigned)nino_store_used(), (unsigned)nino_store_crc());
     link_send(reply);
 }
 
