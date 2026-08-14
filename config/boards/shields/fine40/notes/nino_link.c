@@ -42,7 +42,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define LINK_NODE DT_NODELABEL(nino_cdc)
 
 /* "DATA " plus the longest chunk the host may send, plus slack. */
-#define LINE_MAX 320
+#define NINO_LINE_MAX 320
 #define RX_RING_SIZE 1024
 #define CHUNK_BYTES_MAX 192
 
@@ -54,7 +54,7 @@ static const struct device *const link_dev = DEVICE_DT_GET(LINK_NODE);
 RING_BUF_DECLARE(rx_ring, RX_RING_SIZE);
 static K_SEM_DEFINE(rx_ready, 0, 1);
 
-static char line[LINE_MAX];
+static char line[NINO_LINE_MAX];
 static size_t line_len;
 static bool line_overflow;
 static uint8_t chunk[CHUNK_BYTES_MAX];

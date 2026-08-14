@@ -55,6 +55,22 @@ static struct {
     uint32_t crc;
 } committed;
 
+/*
+ * Reads leave no session behind them, so "is a read happening" is a question
+ * about recency rather than state. READ_IDLE_MS is how long a gap can be
+ * before destow is considered finished or given up, either way something the
+ * panel should stop reflecting.
+ *
+ * Declared here, ahead of nino_store_begin(), which clears it — a struct
+ * defined after its first use does not compile.
+ */
+#define READ_IDLE_MS 600
+
+static struct {
+    int64_t last_ms;
+    size_t high_water;
+} reading;
+
 static struct {
     bool active;
     uint32_t declared_total;
@@ -272,18 +288,6 @@ int nino_store_commit(uint32_t *actual_crc) {
 
     return 0;
 }
-
-/*
- * Reads leave no session behind them, so "is a read happening" is a question
- * about recency rather than state. A gap longer than this and destow has
- * either finished or given up; either way the panel should stop saying so.
- */
-#define READ_IDLE_MS 600
-
-static struct {
-    int64_t last_ms;
-    size_t high_water;
-} reading;
 
 bool nino_store_busy(void) { return incoming.active; }
 
