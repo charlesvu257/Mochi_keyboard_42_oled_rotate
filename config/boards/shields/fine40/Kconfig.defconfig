@@ -1,0 +1,355 @@
+if SHIELD_fine40
+
+config ZMK_KEYBOARD_NAME
+    default "NINO"
+
+config I2C
+	default y
+
+config SSD1306
+	default y
+
+# --- Custom OLED status screen ---
+
+choice ZMK_DISPLAY_STATUS_SCREEN
+	default ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+endchoice
+
+config ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+	imply NINO_DISPLAY
+
+config LV_Z_MEM_POOL_SIZE
+	default 4096 if ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+
+# Animating at 25fps on the main thread would add latency to keypresses.
+choice ZMK_DISPLAY_WORK_QUEUE
+	default ZMK_DISPLAY_WORK_QUEUE_DEDICATED
+endchoice
+
+config NINO_DISPLAY
+	bool "NINO status screen: splash, carriage, globe"
+	select LV_USE_CANVAS
+	select LV_USE_IMG
+	select ZMK_HID_INDICATORS
+	help
+	  Boot splash spelling NINO, a typewriter carriage that fills the track
+	  a pass at a time, a carriage-return slam with screen shake, and a
+	  wireframe globe driven by the encoder.
+
+if NINO_DISPLAY
+
+config NINO_PANEL_ROTATED
+	bool "Panel is mounted a quarter turn over"
+	default y
+	help
+	  The framebuffer is always 128x32, but this module is mounted portrait,
+	  so on the glass the 128-pixel axis runs top to bottom. Everything is
+	  drawn in screen space and rotated on the way out. Turn off for a panel
+	  mounted the normal way round.
+
+config NINO_PANEL_FLIP
+	bool "Rotate the other way"
+	depends on NINO_PANEL_ROTATED
+	help
+	  Which of the two quarter turns a rotated panel sits at cannot be known
+	  from the devicetree. If the splash reads upside down, set this.
+
+config NINO_INVERT
+	bool "Swap ink and background"
+	help
+	  Normally the panel is dark with light pixels. Enable this if it reads
+	  the other way round on your hardware. Caps Lock no longer inverts the
+	  panel — it inverts the globe only.
+
+config NINO_FRAME_MS
+	int "Frame interval in milliseconds"
+	default 28
+	help
+	  28ms is about 36fps. Pushing a 512-byte 128x32 frame over I2C at
+	  400kHz costs roughly 12ms, so this still leaves better than half the
+	  interval idle. Latency is most of what makes the panel feel connected
+	  to the keys, so this is worth spending.
+
+	  Every duration in the widget is counted in frames, not milliseconds.
+	  Change this and the shake, slam, ripple and flash lengths below all
+	  need rescaling to match, or the whole screen simply gets twitchier.
+
+# --- Boot splash ---
+
+config NINO_SPLASH_MS
+	int "How long the NINO splash stays up, in milliseconds"
+	default 2500
+	help
+	  The platen seating, the pass that lays the name down and the carriage
+	  return that hands over to the real screen are fixed costs of about
+	  1.4s at the default frame rate; whatever is left over is hold time
+	  under a blinking caret. Setting this below the fixed cost truncates
+	  the hold rather than speeding the mechanism up.
+
+	  Any keypress or knob movement skips the hold and throws the sheet
+	  out, so an impatient dismissal still plays the wipe.
+
+# --- Carriage ---
+
+config NINO_TRACK_LENGTH
+	int "Length of the carriage track, in pixels"
+	default 72
+	help
+	  Must fit between TRACK_TOP and the globe; on a 128-pixel-tall panel,
+	  72 leaves comfortable room. A cartridge's worth of characters is
+	  mapped onto this many pixels, so the two are set independently.
+
+config NINO_CARTRIDGE_CHARS
+	int "Characters in one cartridge pass"
+	default 100
+	help
+	  When this many characters have been typed the bar returns to the top
+	  by itself and starts a fresh pass in a heavier texture. It does not
+	  slam — only Return or the encoder click does that.
+
+config NINO_TICK_CHARS
+	int "Characters between cadence marks"
+	default 30
+	range 1 255
+	help
+	  Two short dashes appear in the margins beside the carriage every this
+	  many characters, for a few frames.
+
+	  This replaced a ring fired on every space. A space is several keys a
+	  second, so anything hung off it accompanies typing rather than
+	  punctuating it — the mark has to be rare to mean anything.
+
+config NINO_GAUGE_PIPS
+	int "Pips in the note-store gauge around the globe"
+	default 16
+	range 4 32
+	help
+	  A ring around the globe showing how full the note store is. Lit pips
+	  are solid, unlit ones sit at the faintest level as the scale they are
+	  read against.
+
+	  Only drawn when NINO_NOTES is enabled — without a store there is
+	  nothing to gauge.
+
+config NINO_FILL_AMP_BASE
+	int "Density of the first pass's fill, 0-64"
+	default 3
+	range 0 64
+	help
+	  Dither amplitude, where 64 is solid and the 8x8 matrix lights exactly
+	  `amp` of its 64 cells. Every value is a distinct density here, unlike
+	  the old 4x4 ladder where odd numbers collapsed onto the even one below.
+
+	  The default of 3 is three cells in sixty-four — a faint tooth on the
+	  paper rather than anything that reads as written text.
+
+config NINO_FILL_AMP_STEP
+	int "How much denser each further pass draws"
+	default 3
+	range 0 64
+	help
+	  Added to the base for every completed cartridge. With base and step
+	  both at 3, ten passes run from three cells of sixty-four up to thirty
+	  — an even ladder from thin to thick, each rung a fixed pattern that
+	  does not move between frames.
+
+config NINO_FILL_AMP_MAX
+	int "Ceiling on the fill density, 0-64"
+	default 30
+	range 0 64
+	help
+	  Passes stop getting denser here. With a base and step of 3 that gives
+	  ten levels, three through thirty cells of every sixty-four.
+
+	  Well under half is the point: the solid bar lights all 64, so ink and
+	  mechanism never converge on the same apparent brightness.
+
+config NINO_SLAM_SPEED
+	int "Carriage return speed, in pixels per frame"
+	default 17
+	help
+	  The carriage creeps down the track as you type but returns at this
+	  speed, so a full track snaps back in about four frames.
+
+config NINO_SLAM_BOUNCE
+	int "Pixels the carriage overshoots the stop before springing back"
+	default 3
+	help
+	  A carriage that halts exactly at zero reads as a jump cut. Driving
+	  past the stop and settling back over two frames is what makes the
+	  return land as an impact. Set to 0 for a hard stop.
+
+config NINO_SLAM_FLASH_FRAMES
+	int "Frames the whole panel inverts on carriage return"
+	default 7
+	help
+	  The slam owns the whole screen, which is what keeps it distinct from
+	  the small local effects.
+
+config NINO_SHAKE_FRAMES
+	int "Frames of screen shake on carriage return"
+	default 7
+
+config NINO_SHAKE_MAG
+	int "Pixels of screen offset during a carriage-return shake"
+	default 3
+	help
+	  The slam shakes across the track, since that is the way the carriage
+	  is travelling.
+
+config NINO_BALL_RECOIL
+	int "Pixels the globe kicks upward when the carriage slams"
+	default 6
+	help
+	  Halves each frame, so it settles in about four.
+
+# --- Globe ---
+
+config NINO_BALL_RADIUS
+	int "Globe radius in pixels"
+	default 12
+	help
+	  Capped by the panel's short axis: at 12 the globe spans 25 of the 32
+	  available pixels.
+
+config NINO_BALL_STEP
+	int "Rotation per detent, in sixteenths of a sine-table step"
+	default 64
+	help
+	  There are 1024 units to a full turn, so the default of 64 is an eighth
+	  turn, 22.5 degrees, per click.
+
+config NINO_BALL_INVERT
+	bool "Reverse which way the knob turns the globe"
+	default y
+	help
+	  Whether a clockwise detent reports as positive depends on how the
+	  encoder is wired, and this board reports it backwards — hence the
+	  default. Clear it if the globe turns against the knob.
+
+config NINO_BALL_MIN_MS
+	int "Shortest gap between knob nudges, in milliseconds"
+	default 60
+	help
+	  Rate limit for encoder events, which may arrive several times per
+	  detent depending on the encoder's resolution.
+
+config NINO_IDLE_MS
+	int "Quiet time before the globe starts turning by itself"
+	default 8000
+	help
+	  Any keypress or knob movement stops it where it stands. Only the globe
+	  moves: the track is holding your cartridge progress, and animating
+	  that would throw information away for the sake of decoration.
+
+config NINO_IDLE_SPIN
+	int "Idle rotation per frame, in sixteenths of a sine-table step"
+	default 1
+	help
+	  1024 units to a full turn, so at the default frame rate 1 works out at
+	  a revolution roughly every 29 seconds. Set to 0 to disable the idle
+	  animation and let the panel go quiet instead — worth doing on battery,
+	  since idle spin means the display never stops being redrawn.
+
+config NINO_KNOB_POSITION
+	int "Keymap position of the encoder push-switch"
+	default 47
+	help
+	  Clicking it flashes the globe and fires the carriage slam, which is
+	  the only thing besides Return that resets the cartridge. The keymap
+	  also binds it to Return; firing the slam from here as well keeps the
+	  knob working if that binding changes.
+
+# --- Diagnostics ---
+
+config NINO_TEST_PATTERN
+	bool "Show a panel geometry check instead of the normal screen"
+	help
+	  Draws the panel edges, a square, and a circle inscribed in that square.
+	  On correct geometry the rectangle sits exactly on the glass edges and
+	  the circle touches the square at the midpoint of each side.
+
+endif # NINO_DISPLAY
+
+# --- Note storage and host link ---
+
+config NINO_NOTES
+	bool "Carry notes in flash, transferred over USB serial"
+	default y
+	select FLASH
+	select FLASH_MAP
+	select RING_BUFFER
+	select SERIAL
+	select UART_INTERRUPT_DRIVEN
+	select USB_DEVICE_STACK
+	select USB_CDC_ACM
+	help
+	  Claims nino_partition (344K) as a raw flash store and exposes a second
+	  CDC ACM port for the host to fill it. The firmware never parses what it
+	  holds — it counts bytes, checks a CRC, and hands them back.
+
+if NINO_NOTES
+
+config NINO_DESTOW_COMMAND
+	string "Command typed at the host to fetch the notes"
+	default "destow"
+	help
+	  Typed into whatever has focus, followed by Return, when SEND is
+	  chosen. Point it at destow.py however your host reaches it — a shim on
+	  PATH, "python destow.py", or a full path.
+
+	  Focus a terminal before choosing SEND. The keyboard cannot tell what
+	  it is typing into.
+
+config NINO_DESTOW_KEY_MS
+	int "Milliseconds between keystroke edges"
+	default 4
+	help
+	  Each edge is followed by this, so an unshifted character costs twice
+	  it and a shifted one four times. A command line is over in well under
+	  a second either way; raise it only if the host drops characters.
+
+config NINO_DESTOW_STACK_SIZE
+	int "Stack for the type-out thread"
+	default 1536
+
+config NINO_DESTOW_PRIORITY
+	int "Priority of the type-out thread"
+	default 8
+	help
+	  Below the host link, which is itself below key scanning. Typing out a
+	  store takes minutes and must never be able to delay a keystroke.
+
+config NINO_LINK_STACK_SIZE
+	int "Stack for the host link thread"
+	default 2048
+
+config NINO_LINK_PRIORITY
+	int "Priority of the host link thread"
+	default 7
+	help
+	  Below the keyboard scanning threads. A note transfer must never be able
+	  to add latency to a keystroke.
+
+endif # NINO_NOTES
+
+if LVGL
+
+# The whole panel is redrawn every frame, so render it in a single pass rather
+# than tiling it. At 1 bit per pixel a 100% buffer is only ~1 KB.
+config LV_Z_VDB_SIZE
+	default 100
+
+config LV_DPI_DEF
+	default 148
+
+config LV_Z_BITS_PER_PIXEL
+	default 1
+
+choice LV_COLOR_DEPTH
+	default LV_COLOR_DEPTH_1
+endchoice
+
+endif # LVGL
+
+endif
